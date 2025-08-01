@@ -1,105 +1,88 @@
 import streamlit as st
+import pdfplumber
 import pandas as pd
-import os
-import io
-import re
-from PyPDF2 import PdfReader
-from pdf2image import convert_from_bytes
 import pytesseract
+from pdf2image import convert_from_bytes
+from io import BytesIO
+import tempfile
+import os
 
-st.set_page_config(page_title="PEPCO PDF to CSV", layout="wide")
-st.title("📄 PEPCO PDF to CSV Converter")
+st.set_page_config(page_title="📄 PDF Table Extractor - Custom Headers")
 
-# --- Load Excel Data ---
-excel_files = [f for f in os.listdir("data") if f.endswith((".xlsx", ".csv"))]
+st.title("📄 PDF Table Extractor - Custom Headers")
+st.caption("Upload PDF file with the table")
 
-if not excel_files:
-    st.error("No Excel files found in /data folder.")
-    st.stop()
+uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
 
-selected = st.selectbox("Select Excel file to merge:", excel_files)
-df_excel = pd.read_excel(os.path.join("data", selected)) if selected.endswith(".xlsx") else pd.read_csv(os.path.join("data", selected))
+# Define expected headers
+expected_headers = [
+    "Order - ID",
+    "Item No",
+    "Supplier product code",
+    "Colour",
+    "6/9", "9/12", "12/18", "18/24", "24/36",
+    "Bar Code"
+]
 
-# --- Upload PDF ---
-uploaded = st.file_uploader("Upload PEPCO PDF", type="pdf")
-
-# --- Extraction Functions ---
-def extract_text_pdf(pdf_bytes):
-    text = ""
+def extract_with_pdfplumber(pdf_bytes):
+    data_rows = []
     try:
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    except Exception:
-        pass
-    return text
+        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages:
+                tables = page.extract_tables()
+                for table in tables:
+                    for row in table:
+                        clean_row = [cell.strip() if isinstance(cell, str) else "" for cell in row]
+                        if any("Order" in str(cell) for cell in clean_row):
+                            continue  # Skip header-like rows
+                        if len(clean_row) >= 10:
+                            data_rows.append(clean_row[:10])
+    except Exception as e:
+        st.error(f"pdfplumber extraction error: {e}")
+    return data_rows
 
-def extract_text_ocr(pdf_bytes):
-    all_text = ""
+def extract_with_ocr(pdf_bytes):
+    data_rows = []
     try:
         images = convert_from_bytes(pdf_bytes)
-        for img in images:
-            all_text += pytesseract.image_to_string(img) + "\n"
-    except Exception:
-        pass
-    return all_text
+        for image in images:
+            text = pytesseract.image_to_string(image)
+            lines = text.split("\n")
+            for line in lines:
+                parts = [p.strip() for p in line.split() if p.strip()]
+                if len(parts) >= 10:
+                    data_rows.append(parts[:10])
+    except Exception as e:
+        st.error(f"OCR extraction error: {e}")
+    return data_rows
 
-def extract_rows(text):
-    pattern = re.compile(
-        r"Order\s*-\s*ID[:\s]*(?P<order>[^\n\r]+).*?"
-        r"Item\s*No[:\s]*(?P<item>[^\n\r]+).*?"
-        r"Supplier\s*product\s*code[:\s]*(?P<sup>[^\n\r]+).*?"
-        r"Colour[:\s]*(?P<colour>[^\n\r]+).*?"
-        r"6/9[:\s]*(?P<sixnine>[^\n\r]+).*?"
-        r"9/12[:\s]*(?P<ninetwelve>[^\n\r]+).*?"
-        r"12/18[:\s]*(?P<tweleigh>[^\n\r]+).*?"
-        r"18/24[:\s]*(?P<eight24>[^\n\r]+).*?"
-        r"24/36[:\s]*(?P<tfour36>[^\n\r]+)",
-        re.IGNORECASE | re.DOTALL
-    )
-    rows = []
-    for m in pattern.finditer(text):
-        rows.append({
-            "Order - ID": m.group("order").strip(),
-            "Item No": m.group("item").strip(),
-            "Supplier product code": m.group("sup").strip(),
-            "Colour": m.group("colour").strip(),
-            "6/9": m.group("sixnine").strip(),
-            "9/12": m.group("ninetwelve").strip(),
-            "12/18": m.group("tweleigh").strip(),
-            "18/24": m.group("eight24").strip(),
-            "24/36": m.group("tfour36").strip(),
-        })
-    return rows
+def build_dataframe(rows):
+    df = pd.DataFrame(rows, columns=expected_headers[:len(rows[0])])
+    return df
 
-# --- Main Processing ---
-if uploaded:
-    pdf_bytes = uploaded.read()
-    text = extract_text_pdf(pdf_bytes)
+if uploaded_file:
+    pdf_bytes = uploaded_file.read()
+    
+    st.info("🔍 Trying to extract table from PDF...")
 
-    if not text.strip():
-        st.warning("No text found — using OCR fallback.")
-        text = extract_text_ocr(pdf_bytes)
+    rows = extract_with_pdfplumber(pdf_bytes)
 
-    if not text.strip():
-        st.error("No extractable text in PDF.")
-        st.stop()
+    if not rows:
+        st.warning("❌ No table found with `pdfplumber`. Trying OCR fallback...")
+        rows = extract_with_ocr(pdf_bytes)
 
-    rows = extract_rows(text)
-
-    if rows:
-        df_new = pd.DataFrame(rows)
-        st.subheader("📋 Extracted Rows")
-        st.dataframe(df_new)
-
-        df_merged = pd.concat([df_excel, df_new], ignore_index=True)
-        st.subheader("📦 Merged Data")
-        st.dataframe(df_merged)
-
-        csv_data = df_merged.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Download Merged CSV", csv_data, "merged_data.csv", "text/csv")
+    if not rows:
+        st.error("No valid data found in PDF text or OCR.")
     else:
-        st.error("Could not parse any valid data rows from PDF.")
+        df = build_dataframe(rows)
+        st.success(f"✅ Extracted {len(df)} rows.")
 
-else:
-    st.info("Please upload a PDF file.")
+        st.dataframe(df)
 
+        csv_data = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download CSV",
+            data=csv_data,
+            file_name="extracted_table.csv",
+            mime="text/csv"
+        )
