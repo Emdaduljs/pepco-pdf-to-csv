@@ -29,24 +29,39 @@ else:
 st.sidebar.header("2. Upload PDF")
 uploaded_pdf = st.sidebar.file_uploader("Upload any type of PDF", type="pdf")
 
-# --- Helper: Extract fields from text (PyMuPDF or OCR) ---
-def extract_fields(text):
-    fields = {
-        "Order - ID": r"Order\s*-\s*ID[:\s]*([^\n\r]+)",
-        "Item No": r"Item\s*No[:\s]*([^\n\r]+)",
-        "Supplier product code": r"Supplier\s*product\s*code[:\s]*([^\n\r]+)",
-        "Colour": r"Colour[:\s]*([^\n\r]+)",
-        "6/9": r"6/9[:\s]*([^\n\r]+)",
-        "9/12": r"9/12[:\s]*([^\n\r]+)",
-        "12/18": r"12/18[:\s]*([^\n\r]+)",
-        "18/24": r"18/24[:\s]*([^\n\r]+)",
-        "24/36": r"24/36[:\s]*([^\n\r]+)",
-    }
-    results = {}
-    for field, pattern in fields.items():
-        match = re.search(pattern, text)
-        results[field] = match.group(1).strip() if match else "Not Found"
-    return results
+# --- Helper: Extract multiple rows of fields from text ---
+def extract_multiple_rows(text):
+    # Pattern to match all occurrences of a block with all fields in sequence (you can adjust)
+    # This example assumes fields appear together in a block in this order:
+    # Order - ID, Item No, Supplier product code, Colour, 6/9, 9/12, 12/18, 18/24, 24/36
+    # Each field is on its own line or separated by newline or spaces
+    pattern = re.compile(
+        r"Order\s*-\s*ID[:\s]*(?P<OrderID>[^\n\r]+)\s*"
+        r"Item\s*No[:\s]*(?P<ItemNo>[^\n\r]+)\s*"
+        r"Supplier\s*product\s*code[:\s]*(?P<SupplierProductCode>[^\n\r]+)\s*"
+        r"Colour[:\s]*(?P<Colour>[^\n\r]+)\s*"
+        r"6/9[:\s]*(?P<SixNine>[^\n\r]+)\s*"
+        r"9/12[:\s]*(?P<NineTwelve>[^\n\r]+)\s*"
+        r"12/18[:\s]*(?P<TwelveEighteen>[^\n\r]+)\s*"
+        r"18/24[:\s]*(?P<EighteenTwentyFour>[^\n\r]+)\s*"
+        r"24/36[:\s]*(?P<TwentyFourThirtySix>[^\n\r]+)",
+        re.IGNORECASE
+    )
+    matches = pattern.finditer(text)
+    rows = []
+    for m in matches:
+        rows.append({
+            "Order - ID": m.group("OrderID").strip(),
+            "Item No": m.group("ItemNo").strip(),
+            "Supplier product code": m.group("SupplierProductCode").strip(),
+            "Colour": m.group("Colour").strip(),
+            "6/9": m.group("SixNine").strip(),
+            "9/12": m.group("NineTwelve").strip(),
+            "12/18": m.group("TwelveEighteen").strip(),
+            "18/24": m.group("EighteenTwentyFour").strip(),
+            "24/36": m.group("TwentyFourThirtySix").strip(),
+        })
+    return rows
 
 # --- Helper: Try extracting tables ---
 def extract_table_data(pdf_file):
@@ -67,7 +82,6 @@ def extract_ocr_text(pdf_file):
         for i, page in enumerate(doc):
             pix = page.get_pixmap(dpi=300)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
-            # Make sure pytesseract is set up correctly
             text = pytesseract.image_to_string(img)
             full_text += text
         return full_text
@@ -86,22 +100,31 @@ if uploaded_pdf:
     st.sidebar.success("✅ PDF uploaded.")
 
     try:
-        # Try extracting text using PyMuPDF
         doc = fitz.open(temp_pdf_path)
         pdf_text = "\n".join([page.get_text() for page in doc])
-        extracted_fields = extract_fields(pdf_text)
-        if "Not Found" in extracted_fields.values():
-            raise ValueError("Text too sparse. Trying OCR fallback...")
+        extracted_rows = extract_multiple_rows(pdf_text)
+        if not extracted_rows:
+            raise ValueError("No multiple rows found in text, trying OCR fallback...")
         method = "📝 Text Extraction (PyMuPDF)"
     except Exception:
-        # OCR fallback only works if running locally with Tesseract installed
         pdf_text = extract_ocr_text(temp_pdf_path)
-        if pdf_text.strip():
-            extracted_fields = extract_fields(pdf_text)
-            method = "🧠 OCR Extraction (Tesseract)"
-        else:
-            extracted_fields = {k: "Not Found" for k in ["Customer Name", "Account Number", "Billing Period", "Total Usage (kWh)", "Service Address"]}
-            method = "❌ No usable text extracted"
+        extracted_rows = extract_multiple_rows(pdf_text)
+        if not extracted_rows:
+            st.warning("No valid data found in PDF text or OCR.")
+            extracted_rows = []
+        method = "🧠 OCR Extraction (Tesseract)"
+
+    # Show extracted rows
+    if extracted_rows:
+        extracted_df = pd.DataFrame(extracted_rows)
+        st.subheader(f"🔍 Extracted Data Rows ({method})")
+        st.dataframe(extracted_df, use_container_width=True)
+
+        # Append extracted data rows to original Excel dataframe
+        merged_df = pd.concat([df, extracted_df], ignore_index=True)
+    else:
+        merged_df = df
+        st.info("No data rows extracted from PDF to append.")
 
     # Try extracting tables with pdfplumber
     try:
@@ -112,19 +135,12 @@ if uploaded_pdf:
             st.dataframe(table_df, use_container_width=True)
     except Exception as e:
         st.warning(f"Failed to extract table data: {e}")
-        table_df = None
 
-    # Display extracted fields
-    st.subheader(f"🔍 Extracted Fields ({method})")
-    st.json(extracted_fields)
-
-    # Add to main DataFrame (broadcast single values to all rows)
-    for key, value in extracted_fields.items():
-        df[key] = value
-
+    # Show final merged DataFrame
     st.subheader("📦 Final Merged Data")
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(merged_df, use_container_width=True)
 
-    st.download_button("⬇️ Download CSV", df.to_csv(index=False), "merged_data.csv", "text/csv")
+    st.download_button("⬇️ Download Merged Data as CSV", merged_df.to_csv(index=False), "merged_data.csv", "text/csv")
+
 else:
     st.info("Upload a PDF to extract and merge.")
