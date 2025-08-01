@@ -1,88 +1,99 @@
 import streamlit as st
 import pdfplumber
-import pandas as pd
 import pytesseract
+from pytesseract import Output
 from pdf2image import convert_from_bytes
-from io import BytesIO
+import pandas as pd
 import tempfile
 import os
 
-st.set_page_config(page_title="📄 PDF Table Extractor - Custom Headers")
+# Ensure paths for Windows users
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+POPPLER_PATH = r"C:\Program Files\poppler-xx\Library\bin"  # Replace xx with version
 
+st.set_page_config(page_title="PDF Table Extractor - Custom Headers", layout="wide")
 st.title("📄 PDF Table Extractor - Custom Headers")
-st.caption("Upload PDF file with the table")
 
-uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
-
-# Define expected headers
-expected_headers = [
-    "Order - ID",
-    "Item No",
-    "Supplier product code",
-    "Colour",
-    "6/9", "9/12", "12/18", "18/24", "24/36",
-    "Bar Code"
-]
-
-def extract_with_pdfplumber(pdf_bytes):
-    data_rows = []
-    try:
-        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-            for page in pdf.pages:
-                tables = page.extract_tables()
-                for table in tables:
-                    for row in table:
-                        clean_row = [cell.strip() if isinstance(cell, str) else "" for cell in row]
-                        if any("Order" in str(cell) for cell in clean_row):
-                            continue  # Skip header-like rows
-                        if len(clean_row) >= 10:
-                            data_rows.append(clean_row[:10])
-    except Exception as e:
-        st.error(f"pdfplumber extraction error: {e}")
-    return data_rows
-
-def extract_with_ocr(pdf_bytes):
-    data_rows = []
-    try:
-        images = convert_from_bytes(pdf_bytes)
-        for image in images:
-            text = pytesseract.image_to_string(image)
-            lines = text.split("\n")
-            for line in lines:
-                parts = [p.strip() for p in line.split() if p.strip()]
-                if len(parts) >= 10:
-                    data_rows.append(parts[:10])
-    except Exception as e:
-        st.error(f"OCR extraction error: {e}")
-    return data_rows
-
-def build_dataframe(rows):
-    df = pd.DataFrame(rows, columns=expected_headers[:len(rows[0])])
-    return df
+uploaded_file = st.file_uploader("Upload PDF file with the table", type=["pdf"])
 
 if uploaded_file:
-    pdf_bytes = uploaded_file.read()
-    
-    st.info("🔍 Trying to extract table from PDF...")
+    st.success(f"Uploaded: {uploaded_file.name}")
+    metadata = {}
+    final_data = pd.DataFrame()
 
-    rows = extract_with_pdfplumber(pdf_bytes)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        tmp_file.write(uploaded_file.read())
+        tmp_path = tmp_file.name
 
-    if not rows:
-        st.warning("❌ No table found with `pdfplumber`. Trying OCR fallback...")
-        rows = extract_with_ocr(pdf_bytes)
+    def extract_with_pdfplumber(path):
+        tables = []
+        meta_text = []
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    meta_text.append(text)
+                table = page.extract_table()
+                if table:
+                    df = pd.DataFrame(table[1:], columns=table[0])
+                    tables.append(df)
+        return "\n".join(meta_text), tables
 
-    if not rows:
-        st.error("No valid data found in PDF text or OCR.")
+    def extract_with_ocr(path):
+        if not os.environ.get("PATH", "").find(POPPLER_PATH) >= 0:
+            os.environ["PATH"] += os.pathsep + POPPLER_PATH
+        images = convert_from_bytes(open(path, 'rb').read())
+        ocr_text = ""
+        for img in images:
+            text = pytesseract.image_to_string(img)
+            ocr_text += text + "\n"
+        return ocr_text
+
+    def parse_metadata(text):
+        lines = text.splitlines()
+        for line in lines:
+            if "Order No" in line:
+                metadata["Order No"] = line.split(":")[-1].strip()
+            if "Order Date" in line:
+                metadata["Order Date"] = line.split(":")[-1].strip()
+            if "Buyer" in line:
+                metadata["Buyer"] = line.split(":")[-1].strip()
+            if "Supplier" in line:
+                metadata["Supplier"] = line.split(":")[-1].strip()
+            if "Style" in line:
+                metadata["Style"] = line.split(":")[-1].strip()
+
+    st.markdown("🔍 Trying to extract table from PDF...")
+    extracted_text, tables = extract_with_pdfplumber(tmp_path)
+
+    if tables:
+        st.success("✅ Table(s) extracted successfully from PDF!")
+        for i, df in enumerate(tables):
+            st.markdown(f"### Table {i + 1}")
+            st.dataframe(df)
+            final_data = pd.concat([final_data, df], ignore_index=True)
     else:
-        df = build_dataframe(rows)
-        st.success(f"✅ Extracted {len(df)} rows.")
+        st.warning("❌ No table found with pdfplumber. Trying OCR fallback...")
+        try:
+            extracted_text = extract_with_ocr(tmp_path)
+            st.text_area("🔍 OCR Extracted Text", extracted_text, height=300)
+        except Exception as e:
+            st.error(f"OCR extraction error: {e}")
 
-        st.dataframe(df)
+    if extracted_text:
+        parse_metadata(extracted_text)
+        if metadata:
+            st.markdown("## 📌 Extracted Metadata")
+            for k, v in metadata.items():
+                st.write(f"**{k}:** {v}")
+        else:
+            st.warning("⚠️ Metadata not clearly found in text.")
+    else:
+        st.warning("⚠️ No valid data found in PDF text or OCR.")
 
-        csv_data = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download CSV",
-            data=csv_data,
-            file_name="extracted_table.csv",
-            mime="text/csv"
-        )
+    if not final_data.empty:
+        st.markdown("## 📤 Export Data")
+        csv = final_data.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download as CSV", csv, f"{uploaded_file.name}.csv", "text/csv")
+    else:
+        st.error("❌ No data rows extracted from PDF to append.")
