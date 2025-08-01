@@ -1,90 +1,130 @@
 import streamlit as st
+import pandas as pd
+import os
+import fitz  # PyMuPDF
 import pdfplumber
-from pdf2image import convert_from_bytes
 import pytesseract
 from PIL import Image
-import pandas as pd
+import re
 import io
 
-st.set_page_config(page_title="📄 PDF Table Extractor - Custom Headers", layout="wide")
-st.title("📄 PDF Table Extractor - Custom Headers")
+st.set_page_config(page_title="Smart PDF Data Merger", layout="wide")
+st.title("📑 Merge Excel with PDF (Text + Tables + Scans)")
 
-st.write("Upload PDF file with tables. If no tables are found, OCR fallback will try to extract text.")
+# --- Load Excel File ---
+st.sidebar.header("1. Select Preloaded Excel")
+excel_files = [f for f in os.listdir("data") if f.endswith((".xlsx", ".csv"))]
+selected_file = st.sidebar.selectbox("Choose a file:", excel_files)
 
-uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
-
-CUSTOM_HEADERS = [
-    "Order - ID",
-    "Item No",
-    "Supplier product code",
-    "Colour",
-    "6/9",
-    "9/12",
-    "12/18",
-    "18/24",
-    "24/36",
-]
-
-def extract_tables_from_pdf(pdf_bytes):
-    tables = []
-    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        for page_number, page in enumerate(pdf.pages, start=1):
-            page_tables = page.extract_tables()
-            if page_tables:
-                for t in page_tables:
-                    tables.append(t)
-    return tables
-
-def ocr_pdf_tables(pdf_bytes):
-    images = convert_from_bytes(pdf_bytes, dpi=300)
-    all_text = ""
-    for img in images:
-        text = pytesseract.image_to_string(img)
-        all_text += text + "\n"
-    return all_text
-
-def parse_text_to_table(text):
-    # Simple heuristic: split lines and whitespace, may need customization
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    rows = [line.split() for line in lines if line]  # crude split by whitespace
-    return rows
-
-if uploaded_file:
-    pdf_bytes = uploaded_file.read()
-
-    # Try pdfplumber tables first
-    tables = extract_tables_from_pdf(pdf_bytes)
-    if not tables:
-        st.warning("No tables found using pdfplumber. Trying OCR fallback...")
-        ocr_text = ocr_pdf_tables(pdf_bytes)
-        rows = parse_text_to_table(ocr_text)
-        if not rows:
-            st.error("No tables found with OCR fallback either.")
-        else:
-            st.success(f"OCR extracted approx {len(rows)} rows.")
-            df = pd.DataFrame(rows)
-            st.dataframe(df)
-    else:
-        st.success(f"Found {len(tables)} tables with pdfplumber.")
-        # For simplicity, use first table
-        raw_table = tables[0]
-        # Some rows might be uneven, normalize length
-        max_cols = max(len(row) for row in raw_table)
-        normalized_rows = [row + ['']*(max_cols - len(row)) for row in raw_table]
-
-        # Create DataFrame with your custom headers if possible
-        if len(CUSTOM_HEADERS) == max_cols:
-            df = pd.DataFrame(normalized_rows[1:], columns=CUSTOM_HEADERS)
-        else:
-            df = pd.DataFrame(normalized_rows[1:], columns=normalized_rows[0])  # use first row as header
-
-        st.dataframe(df)
-
-    # Provide CSV download
-    if 'df' in locals():
-        csv_data = df.to_csv(index=False).encode('utf-8')
-        st.download_button("⬇️ Download extracted table as CSV", csv_data, "extracted_table.csv", "text/csv")
-
+if selected_file:
+    path = os.path.join("data", selected_file)
+    df = pd.read_excel(path) if selected_file.endswith(".xlsx") else pd.read_csv(path)
+    st.subheader("📊 Original Excel Data")
+    st.dataframe(df, use_container_width=True)
 else:
-    st.info("Please upload a PDF file to begin.")
+    st.warning("No Excel files found in /data.")
+    st.stop()
 
+# --- Upload PDF ---
+st.sidebar.header("2. Upload PDF")
+uploaded_pdf = st.sidebar.file_uploader("Upload any type of PDF", type="pdf")
+
+# --- Helper: Extract fields from text (PyMuPDF or OCR) ---
+def extract_fields(text):
+    fields = {
+        "Order - ID": r"Order\s*-\s*ID[:\s]*([^\n\r]+)",
+        "Item No": r"Item\s*No[:\s]*([^\n\r]+)",
+        "Supplier product code": r"Supplier\s*product\s*code[:\s]*([^\n\r]+)",
+        "Colour": r"Colour[:\s]*([^\n\r]+)",
+        "6/9": r"6/9[:\s]*([^\n\r]+)",
+        "9/12": r"9/12[:\s]*([^\n\r]+)",
+        "12/18": r"12/18[:\s]*([^\n\r]+)",
+        "18/24": r"18/24[:\s]*([^\n\r]+)",
+        "24/36": r"24/36[:\s]*([^\n\r]+)",
+    }
+    results = {}
+    for field, pattern in fields.items():
+        match = re.search(pattern, text)
+        results[field] = match.group(1).strip() if match else "Not Found"
+    return results
+
+# --- Helper: Try extracting tables ---
+def extract_table_data(pdf_file):
+    table_text = ""
+    with pdfplumber.open(pdf_file) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables()
+            for table in tables:
+                df_table = pd.DataFrame(table[1:], columns=table[0])
+                table_text += df_table.to_csv(index=False)
+    return table_text
+
+# --- Helper: OCR extraction from scanned PDFs (Local only) ---
+def extract_ocr_text(pdf_file):
+    try:
+        doc = fitz.open(pdf_file)
+        full_text = ""
+        for i, page in enumerate(doc):
+            pix = page.get_pixmap(dpi=300)
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            # Make sure pytesseract is set up correctly
+            text = pytesseract.image_to_string(img)
+            full_text += text
+        return full_text
+    except pytesseract.pytesseract.TesseractNotFoundError:
+        st.error("Tesseract OCR is not installed or not found on your system. OCR extraction won't work here.")
+        return ""
+    except Exception as e:
+        st.error(f"OCR extraction failed: {e}")
+        return ""
+
+# --- PDF Processing Logic ---
+if uploaded_pdf:
+    temp_pdf_path = "temp_upload.pdf"
+    with open(temp_pdf_path, "wb") as f:
+        f.write(uploaded_pdf.read())
+    st.sidebar.success("✅ PDF uploaded.")
+
+    try:
+        # Try extracting text using PyMuPDF
+        doc = fitz.open(temp_pdf_path)
+        pdf_text = "\n".join([page.get_text() for page in doc])
+        extracted_fields = extract_fields(pdf_text)
+        if "Not Found" in extracted_fields.values():
+            raise ValueError("Text too sparse. Trying OCR fallback...")
+        method = "📝 Text Extraction (PyMuPDF)"
+    except Exception:
+        # OCR fallback only works if running locally with Tesseract installed
+        pdf_text = extract_ocr_text(temp_pdf_path)
+        if pdf_text.strip():
+            extracted_fields = extract_fields(pdf_text)
+            method = "🧠 OCR Extraction (Tesseract)"
+        else:
+            extracted_fields = {k: "Not Found" for k in ["Customer Name", "Account Number", "Billing Period", "Total Usage (kWh)", "Service Address"]}
+            method = "❌ No usable text extracted"
+
+    # Try extracting tables with pdfplumber
+    try:
+        table_data_csv = extract_table_data(temp_pdf_path)
+        table_df = pd.read_csv(io.StringIO(table_data_csv)) if table_data_csv else None
+        if table_df is not None:
+            st.subheader("📄 Table Extracted from PDF (if any)")
+            st.dataframe(table_df, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Failed to extract table data: {e}")
+        table_df = None
+
+    # Display extracted fields
+    st.subheader(f"🔍 Extracted Fields ({method})")
+    st.json(extracted_fields)
+
+    # Add to main DataFrame (broadcast single values to all rows)
+    for key, value in extracted_fields.items():
+        df[key] = value
+
+    st.subheader("📦 Final Merged Data")
+    st.dataframe(df, use_container_width=True)
+
+    st.download_button("⬇️ Download CSV", df.to_csv(index=False), "merged_data.csv", "text/csv")
+else:
+    st.info("Upload a PDF to extract and merge.")
