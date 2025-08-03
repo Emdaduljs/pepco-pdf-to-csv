@@ -1,31 +1,22 @@
+import streamlit as st
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import pandas as pd
-import datetime
-import os
-import json
+from google.oauth2.service_account import Credentials
 
-def get_credentials():
-    if "GCP_SERVICE_ACCOUNT" in os.environ:
-        creds_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
-    else:
-        with open("client_secret.json") as f:
-            creds_dict = json.load(f)
+def get_gsheet_client():
+    creds_dict = st.secrets["gcp_service_account"]
+    creds = Credentials.from_service_account_info(creds_dict)
+    return gspread.authorize(creds)
 
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    return ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-
-def upload_to_gsheet(df: pd.DataFrame, spreadsheet_url: str, sheet_name: str = None):
-    client = gspread.authorize(get_credentials())
+def upload_to_gsheet(df, spreadsheet_url, sheet_name):
+    client = get_gsheet_client()
     sheet = client.open_by_url(spreadsheet_url)
 
-    if not sheet_name:
-        sheet_name = "Export " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    if sheet_name:
+        worksheet = sheet.add_worksheet(title=sheet_name, rows="100", cols="20")
+    else:
+        from datetime import datetime
+        sheet_name = datetime.now().strftime("Export_%Y%m%d_%H%M%S")
+        worksheet = sheet.add_worksheet(title=sheet_name, rows="100", cols="20")
 
-    worksheet = sheet.add_worksheet(title=sheet_name, rows=str(len(df)), cols=str(len(df.columns)))
     worksheet.update([df.columns.values.tolist()] + df.values.tolist())
-
     return spreadsheet_url
