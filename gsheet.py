@@ -1,22 +1,31 @@
-import streamlit as st
 import gspread
-from google.oauth2.service_account import Credentials
+from oauth2client.service_account import ServiceAccountCredentials
 
 def get_gsheet_client():
-    creds_dict = st.secrets["gcp_service_account"]
-    creds = Credentials.from_service_account_info(creds_dict)
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
     return gspread.authorize(creds)
 
-def upload_to_gsheet(df, spreadsheet_url, sheet_name):
+def upload_to_gsheet(df_list, spreadsheet_url, sheet_name):
     client = get_gsheet_client()
-    sheet = client.open_by_url(spreadsheet_url)
-
-    if sheet_name:
-        worksheet = sheet.add_worksheet(title=sheet_name, rows="100", cols="20")
+    if "docs.google.com" in spreadsheet_url:
+        spreadsheet = client.open_by_url(spreadsheet_url)
     else:
-        from datetime import datetime
-        sheet_name = datetime.now().strftime("Export_%Y%m%d_%H%M%S")
-        worksheet = sheet.add_worksheet(title=sheet_name, rows="100", cols="20")
+        spreadsheet = client.open_by_key(spreadsheet_url)
 
-    worksheet.update([df.columns.values.tolist()] + df.values.tolist())
-    return spreadsheet_url
+    try:
+        worksheet = spreadsheet.worksheet(sheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(title=sheet_name, rows="1000", cols="26")
+
+    worksheet.clear()
+
+    start_row = 1
+    for df in df_list:
+        rows = [df.columns.tolist()] + df.values.tolist()
+        end_row = start_row + len(rows) - 1
+        cell_range = f"A{start_row}"
+        worksheet.update(cell_range, rows)
+        start_row = end_row + 1
+
+    return spreadsheet.url
