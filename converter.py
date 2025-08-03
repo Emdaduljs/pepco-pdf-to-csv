@@ -20,9 +20,24 @@ def parse_pdf_to_dataframe(pdf_file):
 
     df = pd.DataFrame(data)
 
-    # Optionally use first row as header
     if len(df) > 1:
-        df.columns = df.iloc[0]
+        # Set first row as header
+        headers = df.iloc[0].tolist()
+        headers = make_unique(headers)
+        df.columns = headers
         df = df[1:].reset_index(drop=True)
 
     return df
+
+def make_unique(seq):
+    seen = {}
+    result = []
+    for item in seq:
+        if item in seen:
+            seen[item] += 1
+            new_item = f"{item}_{seen[item]}"
+        else:
+            seen[item] = 0
+            new_item = item
+        result.append(new_item if new_item else "Unnamed")
+    return result
