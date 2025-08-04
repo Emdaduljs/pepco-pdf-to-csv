@@ -1,36 +1,74 @@
 ﻿import streamlit as st
-import fitz  # PyMuPDF
 import pandas as pd
-from converter import extract_tables_from_pdf
-from gsheet import upload_to_gsheet
+import pdfplumber
+import io
+import datetime
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
-st.set_page_config(page_title="PDF to Google Sheet - Pepco", layout="centered")
+# ------------------- CONFIG -------------------
+SHEET_NAME = 'Sheet3'
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
+# ------------------- LOAD GOOGLE SHEETS CLIENT -------------------
+@st.cache_resource
+def get_gsheet_client():
+    credentials = service_account.Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], scopes=SCOPES
+    )
+    return build("sheets", "v4", credentials=credentials)
+
+# ------------------- PARSE PDF -------------------
+def extract_tables_from_pdf(uploaded_pdf):
+    pdf_data = []
+    with pdfplumber.open(uploaded_pdf) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables()
+            for table in tables:
+                df = pd.DataFrame(table)
+                df = df.dropna(how="all")  # Drop fully empty rows
+                if not df.empty:
+                    pdf_data.append(df)
+    return pd.concat(pdf_data, ignore_index=True) if pdf_data else pd.DataFrame()
+
+# ------------------- EXPORT TO GOOGLE SHEETS -------------------
+def export_to_sheet(df, sheet_id):
+    service = get_gsheet_client()
+    sheet = service.spreadsheets()
+
+    # Clear Sheet3
+    sheet.values().clear(
+        spreadsheetId=sheet_id,
+        range=SHEET_NAME
+    ).execute()
+
+    # Upload new data
+    values = df.astype(str).values.tolist()
+    sheet.values().update(
+        spreadsheetId=sheet_id,
+        range=SHEET_NAME,
+        valueInputOption="RAW",
+        body={"values": [df.columns.tolist()] + values}
+    ).execute()
+
+# ------------------- STREAMLIT UI -------------------
 st.title("📄 PDF to Google Sheet - Pepco")
-st.markdown("Upload a PDF file with tables. The app will extract data and upload to **Sheet3**.")
 
-uploaded_file = st.file_uploader("Choose PDF file", type="pdf")
+sheet_id = st.secrets["spreadsheet_id"]
+uploaded_pdf = st.file_uploader("Upload PDF", type=["pdf"])
 
-if uploaded_file:
-    with open("temp.pdf", "wb") as f:
-        f.write(uploaded_file.read())
-
-    st.success("PDF uploaded. Extracting tables...")
-
+if uploaded_pdf:
     try:
-        dfs = extract_tables_from_pdf("temp.pdf")
-        if not dfs:
-            st.error("No tables were detected in this PDF.")
+        st.info("Parsing PDF...")
+        df = extract_tables_from_pdf(uploaded_pdf)
+
+        if df.empty:
+            st.error("No table found in PDF.")
         else:
-            combined_df = pd.concat(dfs, ignore_index=True)
-            st.write("✅ Table preview:", combined_df.head())
+            st.dataframe(df, use_container_width=True)
+            st.success("✅ Table extracted.")
 
-            # Upload full table to Google Sheets
-            try:
-                upload_to_gsheet(combined_df)
-                st.success("✅ Uploaded to Google Sheets → Sheet3 successfully.")
-            except Exception as e:
-                st.error(f"❌ Error uploading to Google Sheets: {e}")
-
+            export_to_sheet(df, sheet_id)
+            st.success(f"✅ Data exported to '{SHEET_NAME}' in your Google Sheet.")
     except Exception as e:
-        st.error(f"❌ Failed to extract data: {e}")
+        st.error(f"❌ Error: {e}")
