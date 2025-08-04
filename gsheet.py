@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -11,16 +11,16 @@ def get_gsheet_client():
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     return gspread.authorize(creds)
 
-def upload_to_gsheet(df, spreadsheet_url, sheet_name):
+def upload_to_gsheet(df, spreadsheet_url, sheet_name="Sheet3"):
     client = get_gsheet_client()
     sheet = client.open_by_url(spreadsheet_url)
 
-    if sheet_name:
-        worksheet = sheet.add_worksheet(title=sheet_name, rows="100", cols="20")
-    else:
-        from datetime import datetime
-        sheet_name = datetime.now().strftime("Export_%Y%m%d_%H%M%S")
+    try:
+        worksheet = sheet.worksheet(sheet_name)
+        worksheet.clear()  # ✅ Clear old data first
+    except gspread.exceptions.WorksheetNotFound:
         worksheet = sheet.add_worksheet(title=sheet_name, rows="100", cols="20")
 
+    # ✅ Upload new data
     worksheet.update([df.columns.values.tolist()] + df.values.tolist())
     return spreadsheet_url
