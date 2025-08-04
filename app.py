@@ -1,38 +1,36 @@
 ﻿import streamlit as st
+import fitz  # PyMuPDF
 import pandas as pd
-from converter import parse_pdf_to_dataframe_bounding_boxes
-from gsheet import upload_to_existing_sheet
+from converter import extract_tables_from_pdf
+from gsheet import upload_to_gsheet
 
-st.set_page_config(page_title="PDF to Sheet", layout="centered")
-st.title("📄 Upload PDF → Export to Google Sheet + CSV")
+st.set_page_config(page_title="PDF to Google Sheet - Pepco", layout="centered")
 
-uploaded_pdf = st.file_uploader("📁 Upload your PDF", type="pdf")
-spreadsheet_url = st.text_input("🔗 Google Spreadsheet URL")
+st.title("📄 PDF to Google Sheet - Pepco")
+st.markdown("Upload a PDF file with tables. The app will extract data and upload to **Sheet3**.")
 
-if uploaded_pdf and spreadsheet_url:
-    if st.button("🚀 Process & Export"):
-        try:
-            with st.spinner("⏳ Reading PDF..."):
-                df = parse_pdf_to_dataframe_bounding_boxes(uploaded_pdf)
-            st.success("✅ PDF parsed")
-            st.dataframe(df)
-        except Exception as e:
-            st.error(f"Error parsing PDF: {e}")
-            st.stop()
+uploaded_file = st.file_uploader("Choose PDF file", type="pdf")
 
-        if not df.empty:
-            if "ORDER" in df.columns and "ITEM" in df.columns:
-                try:
-                    with st.spinner("📤 Uploading to Google Sheets..."):
-                        sheet_url = upload_to_existing_sheet(df, spreadsheet_url, "Sheet3", auto_resize=True, rename_with_timestamp=True)
-                    st.success("✅ Uploaded to Google Sheets")
-                    st.markdown(f"[🔗 Open Sheet]({sheet_url})", unsafe_allow_html=True)
+if uploaded_file:
+    with open("temp.pdf", "wb") as f:
+        f.write(uploaded_file.read())
 
-                    csv = df.to_csv(index=False).encode("utf-8")
-                    st.download_button("⬇ Download CSV", data=csv, file_name="converted.csv", mime="text/csv")
-                except Exception as e:
-                    st.error(f"❌ Error uploading to Google Sheets: {e}")
-            else:
-                st.error("❌ 'ORDER' and 'ITEM' columns not found in parsed data.")
-else:
-    st.info("📌 Upload a PDF and provide your Google Sheet URL.")
+    st.success("PDF uploaded. Extracting tables...")
+
+    try:
+        dfs = extract_tables_from_pdf("temp.pdf")
+        if not dfs:
+            st.error("No tables were detected in this PDF.")
+        else:
+            combined_df = pd.concat(dfs, ignore_index=True)
+            st.write("✅ Table preview:", combined_df.head())
+
+            # Upload full table to Google Sheets
+            try:
+                upload_to_gsheet(combined_df)
+                st.success("✅ Uploaded to Google Sheets → Sheet3 successfully.")
+            except Exception as e:
+                st.error(f"❌ Error uploading to Google Sheets: {e}")
+
+    except Exception as e:
+        st.error(f"❌ Failed to extract data: {e}")
