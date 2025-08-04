@@ -1,7 +1,5 @@
 streamlit
-pdfplumber
-google-api-python-client
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
 pandas
+PyMuPDF
+gspread
+google-auth
