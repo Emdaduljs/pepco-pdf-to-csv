@@ -1,82 +1,54 @@
-﻿import gspread
-from google.oauth2.service_account import Credentials
-from datetime import datetime
-import googleapiclient.discovery
+﻿import streamlit as st
 
-def get_gsheet_client():
-    creds_dict = st.secrets["gcp_service_account"]
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive.file"
-    ]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    return gspread.authorize(creds)
+st.set_page_config(page_title="PDF to Sheet", layout="centered")
+st.write("✅ App is running!")  # Debug: confirm app starts
 
-def upload_to_gsheet(df, spreadsheet_url):
-    client = get_gsheet_client()
-    sheet = client.open_by_url(spreadsheet_url)
+# Debug block to verify imports
+try:
+    import pandas as pd
+    import fitz  # PyMuPDF
+    import gspread
+    import googleapiclient.discovery
+    st.write("All imports OK")
+except Exception as e:
+    st.error(f"Import error: {e}")
+    st.stop()
 
-    # Delete "Sheet3" if it exists
-    try:
-        old_ws = sheet.worksheet("Sheet3")
-        sheet.del_worksheet(old_ws)
-    except gspread.exceptions.WorksheetNotFound:
-        pass
+from converter import parse_pdf_to_dataframe_bounding_boxes
+from gsheet import upload_to_gsheet
 
-    # Timestamped worksheet name
-    sheet_name = datetime.now().strftime("Export_%Y%m%d_%H%M")
-    worksheet = sheet.add_worksheet(title=sheet_name, rows=str(len(df)+5), cols=str(len(df.columns)+5))
+st.title("📄 Upload PDF → Export to Google Sheet + CSV")
 
-    # Upload data
-    worksheet.update([df.columns.values.tolist()] + df.values.tolist())
+uploaded_pdf = st.file_uploader("📁 Upload your PDF", type="pdf")
+spreadsheet_url = st.text_input("🔗 Google Spreadsheet URL")
+sheet_name = st.text_input("📄 Sheet Name (optional)")  # Ignored by upload function
 
-    # Auto resize & format
-    resize_columns(sheet.id, worksheet._properties["sheetId"], len(df.columns))
-    format_header(sheet.id, worksheet._properties["sheetId"], len(df.columns))
+if uploaded_pdf and spreadsheet_url:
+    if st.button("🚀 Process & Export"):
+        try:
+            with st.spinner("⏳ Reading PDF..."):
+                df = parse_pdf_to_dataframe_bounding_boxes(uploaded_pdf)
+            st.success("✅ PDF parsed")
+            st.dataframe(df)
+        except Exception as parse_err:
+            st.error(f"Error parsing PDF: {parse_err}")
+            st.stop()
 
-    return f"{spreadsheet_url}#gid={worksheet.id}"
+        if not df.empty:
+            try:
+                with st.spinner("📤 Uploading to Google Sheets..."):
+                    sheet_link = upload_to_gsheet(df, spreadsheet_url)
+                st.success("✅ Exported to Google Sheets")
+                st.markdown(f"[Open Google Sheet]({sheet_link})", unsafe_allow_html=True)
 
-def resize_columns(spreadsheet_id, sheet_id, num_cols):
-    creds_dict = st.secrets["gcp_service_account"]
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-
-    service = googleapiclient.discovery.build("sheets", "v4", credentials=creds)
-    requests = [{
-        "autoResizeDimensions": {
-            "dimensions": {
-                "sheetId": sheet_id,
-                "dimension": "COLUMNS",
-                "startIndex": 0,
-                "endIndex": num_cols
-            }
-        }
-    }]
-    body = {"requests": requests}
-    service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
-
-def format_header(spreadsheet_id, sheet_id, num_cols):
-    creds_dict = st.secrets["gcp_service_account"]
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-
-    service = googleapiclient.discovery.build("sheets", "v4", credentials=creds)
-    requests = [{
-        "repeatCell": {
-            "range": {
-                "sheetId": sheet_id,
-                "startRowIndex": 0,
-                "endRowIndex": 1,
-                "startColumnIndex": 0,
-                "endColumnIndex": num_cols
-            },
-            "cell": {
-                "userEnteredFormat": {
-                    "textFormat": {"bold": True}
-                }
-            },
-            "fields": "userEnteredFormat.textFormat.bold"
-        }
-    }]
-    body = {"requests": requests}
-    service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
+                csv_bytes = df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="⬇ Download CSV",
+                    data=csv_bytes,
+                    file_name="converted.csv",
+                    mime="text/csv"
+                )
+            except Exception as upload_err:
+                st.error(f"Error uploading to Google Sheets: {upload_err}")
+else:
+    st.info("📌 Upload a PDF and paste your Google Sheet URL.")
