@@ -12,11 +12,11 @@ def upload_to_gsheet(df, spreadsheet_url, sheet_name):
     sheet = client.open_by_url(spreadsheet_url)
 
     if sheet_name:
-        worksheet = sheet.add_worksheet(title=sheet_name, rows="100", cols="20")
+        worksheet = sheet.add_worksheet(title=sheet_name, rows=str(len(df) + 10), cols=str(len(df.columns) + 5))
     else:
         from datetime import datetime
         sheet_name = datetime.now().strftime("Export_%Y%m%d_%H%M%S")
-        worksheet = sheet.add_worksheet(title=sheet_name, rows="100", cols="20")
+        worksheet = sheet.add_worksheet(title=sheet_name, rows=str(len(df) + 10), cols=str(len(df.columns) + 5))
 
     worksheet.update([df.columns.values.tolist()] + df.values.tolist())
     return spreadsheet_url

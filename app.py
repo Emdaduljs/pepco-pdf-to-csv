@@ -1,6 +1,6 @@
 ﻿import streamlit as st
 import pandas as pd
-from converter import parse_pdf_to_dataframe
+from converter import parse_pdf_to_dataframe_bounding_boxes
 from gsheet import upload_to_gsheet
 
 st.set_page_config(page_title="PDF to Sheet", layout="centered")
@@ -12,18 +12,25 @@ sheet_name = st.text_input("📄 Sheet Name (optional)")
 
 if uploaded_pdf and spreadsheet_url:
     if st.button("🚀 Process & Export"):
-        with st.spinner("⏳ Reading PDF..."):
-            df = parse_pdf_to_dataframe(uploaded_pdf)
-        st.success("✅ PDF parsed")
-        st.dataframe(df)
+        try:
+            with st.spinner("⏳ Reading PDF..."):
+                df = parse_pdf_to_dataframe_bounding_boxes(uploaded_pdf)
+            st.success("✅ PDF parsed")
+            st.dataframe(df)
+        except Exception as e:
+            st.error(f"Error parsing PDF: {e}")
+            st.stop()
 
         if not df.empty:
-            with st.spinner("📤 Uploading to Google Sheets..."):
-                gsheet_url = upload_to_gsheet(df, spreadsheet_url, sheet_name)
-            st.success("✅ Uploaded to Google Sheets")
-            st.markdown(f"[Open Google Sheet]({gsheet_url})", unsafe_allow_html=True)
+            try:
+                with st.spinner("📤 Uploading to Google Sheets..."):
+                    gsheet_url = upload_to_gsheet(df, spreadsheet_url, sheet_name)
+                st.success("✅ Uploaded to Google Sheets")
+                st.markdown(f"[Open Google Sheet]({gsheet_url})", unsafe_allow_html=True)
 
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("⬇ Download CSV", data=csv, file_name="converted.csv", mime="text/csv")
+                csv = df.to_csv(index=False).encode("utf-8")
+                st.download_button("⬇ Download CSV", data=csv, file_name="converted.csv", mime="text/csv")
+            except Exception as e:
+                st.error(f"Error uploading to Google Sheets: {e}")
 else:
     st.info("📌 Upload a PDF and paste your Google Sheet URL.")
