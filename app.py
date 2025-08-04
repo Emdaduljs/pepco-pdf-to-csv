@@ -1,54 +1,33 @@
 ﻿import streamlit as st
+import tempfile
+import os
 
-st.set_page_config(page_title="PDF to Sheet", layout="centered")
-st.write("✅ App is running!")  # Debug: confirm app starts
-
-# Debug block to verify imports
-try:
-    import pandas as pd
-    import fitz  # PyMuPDF
-    import gspread
-    import googleapiclient.discovery
-    st.write("All imports OK")
-except Exception as e:
-    st.error(f"Import error: {e}")
-    st.stop()
-
-from converter import parse_pdf_to_dataframe_bounding_boxes
+from converter import extract_tables_from_pdf
 from gsheet import upload_to_gsheet
 
-st.title("📄 Upload PDF → Export to Google Sheet + CSV")
+st.title("PDF to Google Sheets - Pepco")
 
-uploaded_pdf = st.file_uploader("📁 Upload your PDF", type="pdf")
-spreadsheet_url = st.text_input("🔗 Google Spreadsheet URL")
-sheet_name = st.text_input("📄 Sheet Name (optional)")  # Ignored by upload function
+spreadsheet_url = st.secrets["spreadsheet_url"]
 
-if uploaded_pdf and spreadsheet_url:
-    if st.button("🚀 Process & Export"):
+uploaded_file = st.file_uploader("Upload your PDF", type=["pdf"])
+
+if uploaded_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(uploaded_file.read())
+        pdf_path = tmp.name
+
+    st.info("Processing PDF...")
+    df = extract_tables_from_pdf(pdf_path)
+
+    if df.empty:
+        st.error("No valid tables found in PDF.")
+    else:
+        st.success("Tables extracted. Uploading to Google Sheets...")
         try:
-            with st.spinner("⏳ Reading PDF..."):
-                df = parse_pdf_to_dataframe_bounding_boxes(uploaded_pdf)
-            st.success("✅ PDF parsed")
-            st.dataframe(df)
-        except Exception as parse_err:
-            st.error(f"Error parsing PDF: {parse_err}")
-            st.stop()
+            sheet_link = upload_to_gsheet(df, spreadsheet_url)
+            st.success("Upload successful!")
+            st.markdown(f"[Open Sheet]({sheet_link})")
+        except Exception as e:
+            st.error(f"Error uploading to Google Sheets: {e}")
 
-        if not df.empty:
-            try:
-                with st.spinner("📤 Uploading to Google Sheets..."):
-                    sheet_link = upload_to_gsheet(df, spreadsheet_url)
-                st.success("✅ Exported to Google Sheets")
-                st.markdown(f"[Open Google Sheet]({sheet_link})", unsafe_allow_html=True)
-
-                csv_bytes = df.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    label="⬇ Download CSV",
-                    data=csv_bytes,
-                    file_name="converted.csv",
-                    mime="text/csv"
-                )
-            except Exception as upload_err:
-                st.error(f"Error uploading to Google Sheets: {upload_err}")
-else:
-    st.info("📌 Upload a PDF and paste your Google Sheet URL.")
+    os.remove(pdf_path)

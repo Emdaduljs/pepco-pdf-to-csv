@@ -1,97 +1,49 @@
-﻿import streamlit as st
-import gspread
+﻿import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+import pandas as pd
+import streamlit as st
 
-def get_gsheet_client():
-    creds_dict = st.secrets["gcp_service_account"]
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive.file"
-    ]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    return gspread.authorize(creds)
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+HEADERS = ['ORDER', 'ITEM']
 
 def upload_to_gsheet(df, spreadsheet_url):
-    client = get_gsheet_client()
-    sheet = client.open_by_url(spreadsheet_url)
+    df.columns = df.columns.str.upper().str.strip()
+    df = df[[col for col in df.columns if col in HEADERS]]
 
-    # 🧹 Delete old "Sheet3" if it exists
+    # Ensure both headers are present
+    for col in HEADERS:
+        if col not in df.columns:
+            df[col] = ""
+
+    df = df[HEADERS]
+
+    # Final formatted output
+    output_data = [HEADERS] + df.values.tolist()
+
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=SCOPES
+    )
+    client = gspread.authorize(creds)
+    spreadsheet = client.open_by_url(spreadsheet_url)
+
+    # Remove old Sheet3 if it exists
     try:
-        old_ws = sheet.worksheet("Sheet3")
-        sheet.del_worksheet(old_ws)
-    except gspread.exceptions.WorksheetNotFound:
+        spreadsheet.del_worksheet(spreadsheet.worksheet("Sheet3"))
+    except:
         pass
 
-    # 🕒 Create new timestamped sheet
-    sheet_name = datetime.now().strftime("Export_%Y%m%d_%H%M")
-    worksheet = sheet.add_worksheet(title=sheet_name, rows=str(len(df)+5), cols=str(len(df.columns)+5))
+    # Add new sheet with timestamp
+    timestamp = datetime.now().strftime("Sheet3_%Y%m%d_%H%M%S")
+    worksheet = spreadsheet.add_worksheet(title=timestamp, rows="1000", cols="20")
+    worksheet.update("A1", output_data)
 
-    # 📥 Upload data
-    worksheet.update([df.columns.values.tolist()] + df.values.tolist())
+    # Bold headers
+    worksheet.format("A1:Z1", {"textFormat": {"bold": True}})
 
-    # 🧠 Auto-resize columns
-    resize_columns(sheet.id, worksheet._properties["sheetId"], len(df.columns))
+    # Resize columns
+    for i in range(len(HEADERS)):
+        worksheet.set_column_width(i, 160)
 
-    # 🧢 Format header (bold)
-    format_header(sheet.id, worksheet._properties["sheetId"], len(df.columns))
-
-    return f"{spreadsheet_url}#gid={worksheet.id}"
-
-
-# 📏 Resize column widths automatically
-def resize_columns(spreadsheet_id, sheet_id, num_cols):
-    import google.auth.transport.requests
-    import googleapiclient.discovery
-
-    creds_dict = st.secrets["gcp_service_account"]
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-
-    service = googleapiclient.discovery.build("sheets", "v4", credentials=creds)
-
-    requests = [{
-        "autoResizeDimensions": {
-            "dimensions": {
-                "sheetId": sheet_id,
-                "dimension": "COLUMNS",
-                "startIndex": 0,
-                "endIndex": num_cols
-            }
-        }
-    }]
-
-    body = {"requests": requests}
-    service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
-
-
-# 🎨 Bold header formatting
-def format_header(spreadsheet_id, sheet_id, num_cols):
-    import googleapiclient.discovery
-
-    creds_dict = st.secrets["gcp_service_account"]
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-
-    service = googleapiclient.discovery.build("sheets", "v4", credentials=creds)
-
-    requests = [{
-        "repeatCell": {
-            "range": {
-                "sheetId": sheet_id,
-                "startRowIndex": 0,
-                "endRowIndex": 1,
-                "startColumnIndex": 0,
-                "endColumnIndex": num_cols
-            },
-            "cell": {
-                "userEnteredFormat": {
-                    "textFormat": {"bold": True}
-                }
-            },
-            "fields": "userEnteredFormat.textFormat.bold"
-        }
-    }]
-
-    body = {"requests": requests}
-    service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
+    return f"https://docs.google.com/spreadsheets/d/{spreadsheet.id}/edit#gid={worksheet.id}"
