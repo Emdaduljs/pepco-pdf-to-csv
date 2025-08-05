@@ -79,3 +79,33 @@ def upload_to_existing_sheet(df, spreadsheet_url, sheet_name="Sheet3", auto_resi
         ).execute()
 
     return spreadsheet_url
+
+def download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1"):
+    """
+    Downloads data from the given Google Sheet and returns it as a pandas DataFrame.
+    Assumes first row is header.
+    """
+    sheet_id = spreadsheet_url.split("/d/")[1].split("/")[0]
+    service = get_sheets_service()
+
+    # Fetch the values from the sheet
+    result = service.spreadsheets().values().get(
+        spreadsheetId=sheet_id,
+        range=sheet_name
+    ).execute()
+
+    values = result.get("values", [])
+    if not values:
+        raise Exception(f"No data found in sheet '{sheet_name}'.")
+
+    # First row as columns, rest as data
+    columns = values[0]
+    data = values[1:]
+
+    df = pd.DataFrame(data, columns=columns)
+
+    # Optional: Convert numeric columns automatically
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors='ignore')
+
+    return df
