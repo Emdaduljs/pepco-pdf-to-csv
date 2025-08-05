@@ -3,8 +3,6 @@ import pandas as pd
 from converter import parse_pdf_to_dataframe_bounding_boxes
 from gsheet import upload_to_existing_sheet, download_sheet_as_df
 from PIL import Image
-from io import BytesIO
-import zipfile
 
 # --- SETUP ---
 st.set_page_config(page_title="Cuda Automation CSV Converter", layout="centered")
@@ -24,7 +22,7 @@ users = {
 username = st.sidebar.selectbox("Username", list(users.keys()))
 password = st.sidebar.text_input("Password", type="password")
 
-# Load logo
+# Load logo image
 try:
     logo = Image.open("ui_logo.png")
     st.sidebar.image(logo, width=149)
@@ -40,7 +38,7 @@ if password != users.get(username):
 role = "Editor" if username == "Emdaduljs" else "User"
 st.sidebar.success(f"✅ Logged in as: {role} ({username})")
 
-# --- BRAND SELECTION ---
+# --- BRAND SHEET SELECTION ---
 st.subheader("🔗 Select Your Automation's Buyer")
 spreadsheet_option = st.selectbox("Choose a brand:", ["Pepco", "Pep&co"])
 
@@ -50,11 +48,12 @@ spreadsheet_url_map = {
 }
 spreadsheet_url = spreadsheet_url_map.get(spreadsheet_option)
 
-# --- UPLOAD MULTIPLE PDFs ---
+# --- UPLOAD MULTIPLE PDFs AND PROCESS (All roles allowed) ---
 st.markdown("### 📁 Upload up to 6 PDFs to convert and export")
 uploaded_pdfs = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
 
 sheet_targets = ["Sheet3", "Sheet4", "Sheet5", "Sheet6", "Sheet7", "Sheet8"]
+user_uploaded = False  # Track for user post-download
 
 if uploaded_pdfs:
     if len(uploaded_pdfs) > 6:
@@ -64,11 +63,9 @@ if uploaded_pdfs:
             sheet_name = sheet_targets[i]
             if role == "Editor":
                 st.markdown(f"#### 📄 Processing File {i+1} → `{sheet_name}`")
-
             try:
                 with st.spinner(f"⏳ Parsing PDF {i+1}..."):
                     df = parse_pdf_to_dataframe_bounding_boxes(pdf_file)
-
                 if role == "Editor":
                     st.success(f"✅ PDF {i+1} parsed successfully")
                     st.dataframe(df)
@@ -92,8 +89,8 @@ if uploaded_pdfs:
                 st.error(f"❌ Error uploading to {sheet_name}: {e}")
                 continue
 
-            # Show download for editor only
             if role == "Editor":
+                # CSV download per file
                 csv_data = df.to_csv(index=False).encode("utf-8")
                 st.download_button(
                     f"⬇ Download CSV for {sheet_name}",
@@ -101,37 +98,30 @@ if uploaded_pdfs:
                     file_name=f"{sheet_name.lower()}_converted.csv",
                     mime="text/csv"
                 )
+            else:
+                user_uploaded = True
 
-# --- USER & EDITOR: DOWNLOAD COMBINED SHEET1 + Label_Name ---
-st.markdown("---")
-
-if role == "User":
-    st.info("🔽 Download Sheet1 and Label_Name as CSV")
-
-    if st.button("⬇ Download Combined CSVs"):
+# --- USER: Post-upload download of Sheet1 & Label_Name ---
+if role == "User" and user_uploaded:
+    st.markdown("---")
+    st.info("📥 Download Converted Data")
+    if st.button("⬇ Download All CSV (Sheet1 + Label_Name)"):
         try:
             df1 = download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1")
             df2 = download_sheet_as_df(spreadsheet_url, sheet_name="Label_Name")
 
-            # Create zip buffer
-            zip_buffer = BytesIO()
-            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zip_file:
-                zip_file.writestr("Sheet1.csv", df1.to_csv(index=False))
-                zip_file.writestr("Label_Name.csv", df2.to_csv(index=False))
+            csv1 = df1.to_csv(index=False).encode("utf-8")
+            csv2 = df2.to_csv(index=False).encode("utf-8")
 
-            st.download_button(
-                "⬇ Download ZIP (Sheet1 + Label_Name)",
-                data=zip_buffer.getvalue(),
-                file_name="combined_sheets.zip",
-                mime="application/zip"
-            )
+            st.download_button("⬇ Download Sheet1 CSV", data=csv1, file_name="Sheet1.csv", mime="text/csv")
+            st.download_button("⬇ Download Label_Name CSV", data=csv2, file_name="Label_Name.csv", mime="text/csv")
         except Exception as e:
-            st.error(f"❌ Failed to download: {e}")
+            st.error(f"❌ Error downloading files: {e}")
 
-# --- SHEET1 FILTER DOWNLOAD (All roles) ---
+# --- USER & EDITOR: DOWNLOAD FROM SHEET1 ---
 if role == "Editor":
     st.markdown("---")
-    st.info("🔽 Download CSV from Sheet1 with optional filter")
+    st.info("🔽 Download CSV from Sheet1")
 
     search_term = st.text_input("🔍 Enter word to filter rows in Sheet1 (leave empty for all rows):")
 
@@ -156,5 +146,6 @@ if role == "Editor":
             else:
                 csv = filtered_df.to_csv(index=False).encode("utf-8")
                 st.download_button("⬇ Download Filtered CSV (Sheet1)", data=csv, file_name="sheet1_filtered_data.csv", mime="text/csv")
+
         except Exception as e:
             st.error(f"❌ Failed to download Sheet1 data: {e}")
