@@ -1,8 +1,7 @@
-import streamlit as st
+﻿import streamlit as st
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import pandas as pd
-from datetime import datetime
 
 def get_sheets_service():
     creds_dict = st.secrets["gcp_service_account"]
@@ -11,6 +10,10 @@ def get_sheets_service():
     return build("sheets", "v4", credentials=creds)
 
 def upload_to_existing_sheet(df, spreadsheet_url, sheet_name="Sheet3", auto_resize=True, rename_with_timestamp=False):
+    # 🔒 Force write only to "Sheet3"
+    sheet_name = "Sheet3"
+    rename_with_timestamp = False  # 👈 Disable renaming completely
+
     sheet_id = spreadsheet_url.split("/d/")[1].split("/")[0]
     service = get_sheets_service()
 
@@ -47,7 +50,7 @@ def upload_to_existing_sheet(df, spreadsheet_url, sheet_name="Sheet3", auto_resi
         service.spreadsheets().batchUpdate(
             spreadsheetId=sheet_id,
             body={
-                "requests": [{
+                "requests": [ {
                     "autoResizeDimensions": {
                         "dimensions": {
                             "sheetId": sheet_id_num,
@@ -55,24 +58,6 @@ def upload_to_existing_sheet(df, spreadsheet_url, sheet_name="Sheet3", auto_resi
                             "startIndex": 0,
                             "endIndex": len(df.columns)
                         }
-                    }
-                }]
-            }
-        ).execute()
-
-    # Rename sheet with timestamp
-    if rename_with_timestamp:
-        new_name = f"{sheet_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        service.spreadsheets().batchUpdate(
-            spreadsheetId=sheet_id,
-            body={
-                "requests": [{
-                    "updateSheetProperties": {
-                        "properties": {
-                            "sheetId": sheet_id_num,
-                            "title": new_name
-                        },
-                        "fields": "title"
                     }
                 }]
             }
@@ -88,7 +73,6 @@ def download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1"):
     sheet_id = spreadsheet_url.split("/d/")[1].split("/")[0]
     service = get_sheets_service()
 
-    # Fetch the values from the sheet
     result = service.spreadsheets().values().get(
         spreadsheetId=sheet_id,
         range=sheet_name
@@ -98,13 +82,12 @@ def download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1"):
     if not values:
         raise Exception(f"No data found in sheet '{sheet_name}'.")
 
-    # First row as columns, rest as data
     columns = values[0]
     data = values[1:]
 
     df = pd.DataFrame(data, columns=columns)
 
-    # Optional: Convert numeric columns automatically
+    # Optional: Convert numeric columns
     for col in df.columns:
         df[col] = pd.to_numeric(df[col], errors='ignore')
 
