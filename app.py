@@ -1,7 +1,7 @@
 ﻿import streamlit as st
 import pandas as pd
 from converter import parse_pdf_to_dataframe_bounding_boxes
-from gsheet import upload_to_existing_sheet, download_sheet_as_df  # Assume this function is implemented
+from gsheet import upload_to_existing_sheet, download_sheet_as_df
 from PIL import Image
 
 # --- SETUP ---
@@ -33,61 +33,56 @@ spreadsheet_option = st.selectbox("Choose a brand:", ["Pepco", "Pep&co"])
 
 spreadsheet_url_map = {
     "Pepco": "https://docs.google.com/spreadsheets/d/1ug0VTy8iwUeSdpw4upHkVMxnwSekvYrxz6nm04_BJ-o/edit?usp=sharing",
-    "Pep&co": "https://docs.google.com/spreadsheets/d/YOUR_OTHER_SHEET_ID/edit?usp=sharing"  # Replace with actual
+    "Pep&co": "https://docs.google.com/spreadsheets/d/YOUR_OTHER_SHEET_ID/edit?usp=sharing"
 }
 spreadsheet_url = spreadsheet_url_map.get(spreadsheet_option)
 
-# --- MAIN LOGIC ---
-
-# Allow both Editor and User to upload PDF
+# --- UPLOAD PDF AND PROCESS ---
 uploaded_pdf = st.file_uploader("📁 Upload your PDF", type="pdf")
 
-if role == "Editor":
-    if uploaded_pdf:
-        if st.button("🚀 Convert and Export"):
-            try:
-                with st.spinner("⏳ Reading and parsing PDF..."):
-                    df = parse_pdf_to_dataframe_bounding_boxes(uploaded_pdf)
-                st.success("✅ PDF parsed successfully")
-                st.dataframe(df)
-            except Exception as e:
-                st.error(f"❌ Error parsing PDF: {e}")
-                st.stop()
-
-            # Upload to Google Sheets Sheet3
-            try:
-                with st.spinner("📤 Uploading to Google Sheets (Sheet3)..."):
-                    sheet_url = upload_to_existing_sheet(
-                        df,
-                        spreadsheet_url,
-                        sheet_name="Sheet3",
-                        auto_resize=True,
-                        rename_with_timestamp=False  # Do not rename the tab
-                    )
-                st.success("✅ Uploaded to Google Sheets")
-                st.markdown(f"[🔗 Open Sheet]({sheet_url})", unsafe_allow_html=True)
-            except Exception as e:
-                st.error(f"❌ Error uploading to Google Sheets: {e}")
-
-            # CSV download of parsed data (Editor)
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("⬇ Download CSV (Parsed PDF)", data=csv, file_name="converted.csv", mime="text/csv")
-
-    else:
-        st.info("📌 Please upload a PDF to continue.")
-
-# --- FOR USER ROLE: Allow PDF upload and download Sheet1 ---
-else:
-    st.info("🔒 You are logged in as User. You can download CSV from Sheet1.")
-
-    if uploaded_pdf:
-        st.info("📁 PDF uploaded, but only editors can export to Google Sheets.")
-
-    if st.button("⬇ Download CSV from Sheet1"):
+if uploaded_pdf:
+    if st.button("🚀 Convert and Export"):
         try:
-            # fetch sheet1 dataframe live from spreadsheet_url
-            df_sheet1 = download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1")
-            csv = df_sheet1.to_csv(index=False).encode("utf-8")
-            st.download_button("⬇ Download CSV", data=csv, file_name="sheet1_data.csv", mime="text/csv")
+            with st.spinner("⏳ Reading and parsing PDF..."):
+                df = parse_pdf_to_dataframe_bounding_boxes(uploaded_pdf)
+            st.success("✅ PDF parsed successfully")
+            st.dataframe(df)
         except Exception as e:
-            st.error(f"❌ Failed to download Sheet1 data: {e}")
+            st.error(f"❌ Error parsing PDF: {e}")
+            st.stop()
+
+        # Upload to Google Sheets Sheet3 (for all users)
+        try:
+            with st.spinner("📤 Uploading to Google Sheets (Sheet3)..."):
+                sheet_url = upload_to_existing_sheet(
+                    df,
+                    spreadsheet_url,
+                    sheet_name="Sheet3",
+                    auto_resize=True,
+                    rename_with_timestamp=False
+                )
+            st.success("✅ Uploaded to Google Sheets")
+            # Only show link if Editor
+            if role == "Editor":
+                st.markdown(f"[🔗 Open Sheet]({sheet_url})", unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"❌ Error uploading to Google Sheets: {e}")
+
+        # CSV download of parsed data for everyone who uploads
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇ Download CSV (Parsed PDF)", data=csv, file_name="converted.csv", mime="text/csv")
+
+else:
+    st.info("📌 Please upload a PDF to continue.")
+
+# --- CSV DOWNLOAD FROM SHEET1 FOR ALL USERS ---
+st.markdown("---")
+st.info("🔽 Download CSV from Sheet1")
+
+if st.button("⬇ Download CSV from Sheet1"):
+    try:
+        df_sheet1 = download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1")
+        csv = df_sheet1.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇ Download CSV (Sheet1)", data=csv, file_name="sheet1_data.csv", mime="text/csv")
+    except Exception as e:
+        st.error(f"❌ Failed to download Sheet1 data: {e}")

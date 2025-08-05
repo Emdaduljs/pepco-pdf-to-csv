@@ -10,9 +10,9 @@ def get_sheets_service():
     return build("sheets", "v4", credentials=creds)
 
 def upload_to_existing_sheet(df, spreadsheet_url, sheet_name="Sheet3", auto_resize=True, rename_with_timestamp=False):
-    # 🔒 Force write only to "Sheet3"
+    # Force write only to "Sheet3"
     sheet_name = "Sheet3"
-    rename_with_timestamp = False  # 👈 Disable renaming completely
+    rename_with_timestamp = False  # Disable renaming completely
 
     sheet_id = spreadsheet_url.split("/d/")[1].split("/")[0]
     service = get_sheets_service()
@@ -50,7 +50,7 @@ def upload_to_existing_sheet(df, spreadsheet_url, sheet_name="Sheet3", auto_resi
         service.spreadsheets().batchUpdate(
             spreadsheetId=sheet_id,
             body={
-                "requests": [ {
+                "requests": [{
                     "autoResizeDimensions": {
                         "dimensions": {
                             "sheetId": sheet_id_num,
@@ -66,10 +66,6 @@ def upload_to_existing_sheet(df, spreadsheet_url, sheet_name="Sheet3", auto_resi
     return spreadsheet_url
 
 def download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1"):
-    """
-    Downloads data from the given Google Sheet and returns it as a pandas DataFrame.
-    Assumes first row is header.
-    """
     sheet_id = spreadsheet_url.split("/d/")[1].split("/")[0]
     service = get_sheets_service()
 
@@ -87,7 +83,6 @@ def download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1"):
 
     df = pd.DataFrame(data, columns=columns)
 
-    # Optional: Convert numeric columns
     for col in df.columns:
         df[col] = pd.to_numeric(df[col], errors='ignore')
 
