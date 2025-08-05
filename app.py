@@ -3,6 +3,8 @@ import pandas as pd
 from converter import parse_pdf_to_dataframe_bounding_boxes
 from gsheet import upload_to_existing_sheet
 from PIL import Image
+import requests
+import io
 
 # --- SETUP ---
 st.set_page_config(page_title="Cuda Automation CSV Converter", layout="centered")
@@ -52,29 +54,26 @@ if uploaded_pdf:
             st.error(f"❌ Error parsing PDF: {e}")
             st.stop()
 
-        if not df.empty:
-            if "ORDER" in df.columns and "ITEM" in df.columns:
-                if role == "Editor":
-                    try:
-                        with st.spinner("📤 Uploading to Google Sheets..."):
-                            sheet_url = upload_to_existing_sheet(
-                                df,
-                                spreadsheet_url,
-                                sheet_name="Sheet3",
-                                auto_resize=True,
-                                rename_with_timestamp=True
-                            )
-                        st.success("✅ Uploaded to Google Sheets")
-                        st.markdown(f"[🔗 Open Sheet]({sheet_url})", unsafe_allow_html=True)
-                    except Exception as e:
-                        st.error(f"❌ Error uploading to Google Sheets: {e}")
-                else:
-                    st.info("🔒 Only editors can upload to Google Sheets.")
+        # Upload to Google Sheets only if editor
+        if role == "Editor":
+            try:
+                with st.spinner("📤 Uploading to Google Sheets..."):
+                    sheet_url = upload_to_existing_sheet(
+                        df,
+                        spreadsheet_url,
+                        sheet_name="Sheet3",
+                        auto_resize=True,
+                        rename_with_timestamp=True
+                    )
+                st.success("✅ Uploaded to Google Sheets")
+                st.markdown(f"[🔗 Open Sheet]({sheet_url})", unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"❌ Error uploading to Google Sheets: {e}")
+        else:
+            st.info("🔒 Only editors can upload to Google Sheets.")
 
-                # Allow CSV download for all roles
-                csv = df.to_csv(index=False).encode("utf-8")
-                st.download_button("⬇ Download CSV", data=csv, file_name="converted.csv", mime="text/csv")
-            else:
-                st.error("❌ 'ORDER' and 'ITEM' columns not found in parsed data.")
+        # Allow CSV download for all roles
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇ Download CSV", data=csv, file_name="converted.csv", mime="text/csv")
 else:
     st.info("📌 Please upload a PDF to continue.")
