@@ -1,7 +1,7 @@
 ﻿import streamlit as st
 import pandas as pd
 from converter import parse_pdf_to_dataframe_bounding_boxes
-from gsheet import upload_to_existing_sheet, download_sheet_as_df  # Assume this function is implemented
+from gsheet import upload_to_existing_sheet, download_sheet_as_df
 from PIL import Image
 
 # --- SETUP ---
@@ -53,7 +53,7 @@ if role == "Editor":
                 st.error(f"❌ Error parsing PDF: {e}")
                 st.stop()
 
-            # Upload to Google Sheets Sheet3
+            # Upload to Sheet3 without renaming allowed
             try:
                 with st.spinner("📤 Uploading to Google Sheets (Sheet3)..."):
                     sheet_url = upload_to_existing_sheet(
@@ -61,17 +61,16 @@ if role == "Editor":
                         spreadsheet_url,
                         sheet_name="Sheet3",
                         auto_resize=True,
-                        rename_with_timestamp=True
+                        rename_with_timestamp=False  # Disallow renaming
                     )
                 st.success("✅ Uploaded to Google Sheets")
                 st.markdown(f"[🔗 Open Sheet]({sheet_url})", unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"❌ Error uploading to Google Sheets: {e}")
 
-            # CSV download of parsed data (Editor)
+            # CSV download of parsed data
             csv = df.to_csv(index=False).encode("utf-8")
             st.download_button("⬇ Download CSV (Parsed PDF)", data=csv, file_name="converted.csv", mime="text/csv")
-
     else:
         st.info("📌 Please upload a PDF to continue.")
 
@@ -81,7 +80,6 @@ else:
 
     if st.button("⬇ Download CSV from Sheet1"):
         try:
-            # fetch sheet1 dataframe live from spreadsheet_url
             df_sheet1 = download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1")
             csv = df_sheet1.to_csv(index=False).encode("utf-8")
             st.download_button("⬇ Download CSV", data=csv, file_name="sheet1_data.csv", mime="text/csv")
