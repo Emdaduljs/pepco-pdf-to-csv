@@ -1,52 +1,79 @@
-
-import streamlit as st
+﻿import streamlit as st
 import pandas as pd
-from converter import parse_pdf_to_dataframe
-from gsheet import upload_to_gsheet
+from converter import parse_pdf_to_dataframe_bounding_boxes
+from gsheet import upload_to_existing_sheet
+from PIL import Image
+import requests
+import io
 
-st.set_page_config(page_title="Cuda Automation CSV Converter from PDF", layout="centered")
-
-st.markdown("""
-    <style>
-        .password-box {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin-top: 20px;
-        }
-        .logo-box img {
-            margin-top: 10px;
-            width: 149px;
-            height: 332px;
-        }
-    </style>
-""", unsafe_allow_html=True)
-
+# --- SETUP ---
+st.set_page_config(page_title="Cuda Automation CSV Converter", layout="centered")
 st.title("📄 Cuda Automation CSV Converter from PDF")
 
-with st.sidebar:
-    st.markdown('<div class="password-box">🔐 <b>Enter Password</b></div>', unsafe_allow_html=True)
-    role = st.radio("Login as", ["Editor", "User"])
-    input_password = st.text_input("Password", type="password")
-    st.markdown('<div class="logo-box"><img src="https://raw.githubusercontent.com/emdadulhaque2009/pepco-streamlit-assets/main/ui_logo.png"></div>', unsafe_allow_html=True)
+# --- SIDEBAR LOGIN & LOGO ---
+st.sidebar.subheader("🔒 Login Required")
+password = st.sidebar.text_input("Enter password", type="password")
 
-if (role == "Editor" and input_password != "123") or (role == "User" and input_password != "1234"):
-    st.error("Invalid password.")
-else:
-    uploaded_pdf = st.file_uploader("📁 Upload your PDF", type="pdf")
-    spreadsheet_url = st.text_input("🔗 Google Spreadsheet URL")
-    st.markdown("🔒 Data will always export to tab: **Sheet3**")
+# Logo below password
+try:
+    logo = Image.open("ui_logo.png")
+    st.sidebar.image(logo, width=149)
+except Exception:
+    st.sidebar.warning("⚠️ Logo not found (ui_logo.png)")
 
-    if uploaded_pdf and spreadsheet_url:
-        with st.spinner("⏳ Processing PDF..."):
-            df = parse_pdf_to_dataframe(uploaded_pdf)
-            st.success("✅ PDF parsed successfully!")
+# Password check
+if password not in ["123", "1234"]:
+    st.warning("Please enter a valid password to continue.")
+    st.stop()
+
+role = "Editor" if password == "123" else "User"
+st.sidebar.success(f"✅ Logged in as: {role}")
+
+# --- FILE UPLOAD ---
+uploaded_pdf = st.file_uploader("📁 Upload your PDF", type="pdf")
+
+# --- BRAND SHEET SELECTION ---
+st.subheader("🔗 Select Your Automation's Buyer")
+spreadsheet_option = st.selectbox("Choose a brand:", ["Pepco", "Pep&co"])
+
+spreadsheet_url_map = {
+    "Pepco": "https://docs.google.com/spreadsheets/d/1ug0VTy8iwUeSdpw4upHkVMxnwSekvYrxz6nm04_BJ-o/edit?usp=sharing",
+    "Pep&co": "https://docs.google.com/spreadsheets/d/YOUR_OTHER_SHEET_ID/edit?usp=sharing"  # Replace with actual
+}
+spreadsheet_url = spreadsheet_url_map.get(spreadsheet_option)
+
+# --- MAIN LOGIC ---
+if uploaded_pdf:
+    if st.button("🚀 Convert and Export"):
+        try:
+            with st.spinner("⏳ Reading and parsing PDF..."):
+                df = parse_pdf_to_dataframe_bounding_boxes(uploaded_pdf)
+            st.success("✅ PDF parsed successfully")
             st.dataframe(df)
+        except Exception as e:
+            st.error(f"❌ Error parsing PDF: {e}")
+            st.stop()
 
-            if st.button("📤 Export to Google Sheet + Download CSV"):
-                upload_to_gsheet(df, spreadsheet_url, "Sheet3")
-                csv_name = uploaded_pdf.name.replace(".pdf", ".csv")
-                df.to_csv(csv_name, index=False)
-                st.success("✅ Exported to Sheet3 and CSV generated!")
-                with open(csv_name, "rb") as f:
-                    st.download_button("⬇️ Download CSV", f, file_name=csv_name)
+        # Upload to Google Sheets only if editor
+        if role == "Editor":
+            try:
+                with st.spinner("📤 Uploading to Google Sheets..."):
+                    sheet_url = upload_to_existing_sheet(
+                        df,
+                        spreadsheet_url,
+                        sheet_name="Sheet3",
+                        auto_resize=True,
+                        rename_with_timestamp=True
+                    )
+                st.success("✅ Uploaded to Google Sheets")
+                st.markdown(f"[🔗 Open Sheet]({sheet_url})", unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"❌ Error uploading to Google Sheets: {e}")
+        else:
+            st.info("🔒 Only editors can upload to Google Sheets.")
+
+        # Allow CSV download for all roles
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇ Download CSV", data=csv, file_name="converted.csv", mime="text/csv")
+else:
+    st.info("📌 Please upload a PDF to continue.")
