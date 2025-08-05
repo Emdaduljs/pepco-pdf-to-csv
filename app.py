@@ -12,14 +12,12 @@ st.title("📄 Cuda Automation CSV Converter from PDF")
 st.sidebar.subheader("🔒 Login Required")
 password = st.sidebar.text_input("Enter password", type="password")
 
-# Logo below password
 try:
     logo = Image.open("ui_logo.png")
     st.sidebar.image(logo, width=149)
 except Exception:
     st.sidebar.warning("⚠️ Logo not found (ui_logo.png)")
 
-# Password check
 if password not in ["123", "1234"]:
     st.warning("Please enter a valid password to continue.")
     st.stop()
@@ -51,7 +49,6 @@ if uploaded_pdf:
             st.error(f"❌ Error parsing PDF: {e}")
             st.stop()
 
-        # Upload to Google Sheets Sheet3 (for all users)
         try:
             with st.spinner("📤 Uploading to Google Sheets (Sheet3)..."):
                 sheet_url = upload_to_existing_sheet(
@@ -62,27 +59,47 @@ if uploaded_pdf:
                     rename_with_timestamp=False
                 )
             st.success("✅ Uploaded to Google Sheets")
-            # Only show link if Editor
             if role == "Editor":
                 st.markdown(f"[🔗 Open Sheet]({sheet_url})", unsafe_allow_html=True)
         except Exception as e:
             st.error(f"❌ Error uploading to Google Sheets: {e}")
 
-        # CSV download of parsed data for everyone who uploads
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button("⬇ Download CSV (Parsed PDF)", data=csv, file_name="converted.csv", mime="text/csv")
-
 else:
     st.info("📌 Please upload a PDF to continue.")
 
-# --- CSV DOWNLOAD FROM SHEET1 FOR ALL USERS ---
 st.markdown("---")
 st.info("🔽 Download CSV from Sheet1")
+
+# NEW: Search box for filtering rows in Sheet1 download
+search_term = st.text_input("🔍 Enter word to filter rows in Sheet1 (leave empty for all rows):")
 
 if st.button("⬇ Download CSV from Sheet1"):
     try:
         df_sheet1 = download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1")
-        csv = df_sheet1.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇ Download CSV (Sheet1)", data=csv, file_name="sheet1_data.csv", mime="text/csv")
+
+        if search_term:
+            search_term_lower = search_term.lower()
+            # Check if any header contains the search term
+            header_match = any(search_term_lower in str(col).lower() for col in df_sheet1.columns)
+
+            if header_match:
+                # If header matches, include all rows
+                filtered_df = df_sheet1
+            else:
+                # Else filter rows where any cell contains search term (case insensitive)
+                mask = df_sheet1.apply(lambda row: row.astype(str).str.lower().str.contains(search_term_lower).any(), axis=1)
+                filtered_df = df_sheet1[mask]
+        else:
+            # No search term, include all rows
+            filtered_df = df_sheet1
+
+        if filtered_df.empty:
+            st.warning("⚠️ No matching rows found for the search term.")
+        else:
+            csv = filtered_df.to_csv(index=False).encode("utf-8")
+            st.download_button("⬇ Download Filtered CSV (Sheet1)", data=csv, file_name="sheet1_filtered_data.csv", mime="text/csv")
+
     except Exception as e:
         st.error(f"❌ Failed to download Sheet1 data: {e}")
