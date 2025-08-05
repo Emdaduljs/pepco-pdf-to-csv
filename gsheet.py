@@ -10,9 +10,9 @@ def get_sheets_service():
     return build("sheets", "v4", credentials=creds)
 
 def upload_to_existing_sheet(df, spreadsheet_url, sheet_name="Sheet3", auto_resize=True, rename_with_timestamp=False):
-    # Force write only to "Sheet3"
-    sheet_name = "Sheet3"
-    rename_with_timestamp = False  # Disable renaming completely
+    # ❌ REMOVE hardcoded override
+    # sheet_name = "Sheet3"
+    # rename_with_timestamp = False
 
     sheet_id = spreadsheet_url.split("/d/")[1].split("/")[0]
     service = get_sheets_service()
@@ -28,7 +28,7 @@ def upload_to_existing_sheet(df, spreadsheet_url, sheet_name="Sheet3", auto_resi
     if sheet_id_num is None:
         raise Exception(f"Sheet '{sheet_name}' not found in spreadsheet.")
 
-    # Clear old data
+    # Clear old data in range A:Z
     service.spreadsheets().values().clear(
         spreadsheetId=sheet_id,
         range=f"{sheet_name}!A:Z"
@@ -81,13 +81,13 @@ def download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1"):
     columns = values[0]
     data = values[1:]
 
-    # Pad rows to match header length to avoid pandas errors
+    # Pad rows to match header length
     max_cols = len(columns)
     padded_data = []
     for row in data:
         if len(row) < max_cols:
             row += [""] * (max_cols - len(row))
-        padded_data.append(row[:max_cols])  # Trim if longer
+        padded_data.append(row[:max_cols])
 
     df = pd.DataFrame(padded_data, columns=columns)
 
