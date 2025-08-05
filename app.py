@@ -11,6 +11,7 @@ st.title("📄 Cuda Automation CSV Converter from PDF")
 # --- SIDEBAR LOGIN & LOGO ---
 st.sidebar.subheader("🔒 Login Required")
 
+# Predefined login credentials
 users = {
     "Emdaduljs": "123",     # Editor
     "Test1": "1234",        # User
@@ -21,20 +22,23 @@ users = {
 username = st.sidebar.selectbox("Username", list(users.keys()))
 password = st.sidebar.text_input("Password", type="password")
 
+# Load logo image
 try:
     logo = Image.open("ui_logo.png")
     st.sidebar.image(logo, width=149)
 except Exception:
     st.sidebar.warning("⚠️ Logo not found (ui_logo.png)")
 
+# Validate login
 if password != users.get(username):
     st.warning("❌ Invalid username or password.")
     st.stop()
 
+# Assign role
 role = "Editor" if username == "Emdaduljs" else "User"
 st.sidebar.success(f"✅ Logged in as: {role} ({username})")
 
-# --- SELECT SPREADSHEET ---
+# --- BRAND SHEET SELECTION ---
 st.subheader("🔗 Select Your Automation's Buyer")
 spreadsheet_option = st.selectbox("Choose a brand:", ["Pepco", "Pep&co"])
 
@@ -44,12 +48,12 @@ spreadsheet_url_map = {
 }
 spreadsheet_url = spreadsheet_url_map.get(spreadsheet_option)
 
-# --- UPLOAD AND PROCESS MULTIPLE PDFs ---
+# --- UPLOAD MULTIPLE PDFs AND PROCESS ---
 st.markdown("### 📁 Upload up to 6 PDFs to convert and export")
 uploaded_pdfs = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
 
 sheet_targets = ["Sheet3", "Sheet4", "Sheet5", "Sheet6", "Sheet7", "Sheet8"]
-user_uploaded = False
+user_uploaded = False  # Track if user has exported PDFs
 
 if uploaded_pdfs:
     if len(uploaded_pdfs) > 6:
@@ -57,24 +61,22 @@ if uploaded_pdfs:
     elif st.button("🚀 Convert and Export All"):
         for i, pdf_file in enumerate(uploaded_pdfs):
             if i >= len(sheet_targets):
-                st.warning(f"❗ Only the first 6 PDFs will be processed.")
                 break
-
             sheet_name = sheet_targets[i]
-            st.markdown(f"#### 📄 Processing File {i+1} → `{sheet_name}`")
-
+            if role == "Editor":
+                st.markdown(f"#### 📄 Processing File {i+1} → `{sheet_name}`")
             try:
                 with st.spinner(f"⏳ Parsing PDF {i+1}..."):
                     df = parse_pdf_to_dataframe_bounding_boxes(pdf_file)
-                st.success(f"✅ PDF {i+1} parsed successfully")
                 if role == "Editor":
+                    st.success(f"✅ PDF {i+1} parsed successfully")
                     st.dataframe(df)
             except Exception as e:
                 st.error(f"❌ Error parsing PDF {i+1}: {e}")
                 continue
 
             try:
-                with st.spinner(f"📤 Uploading to `{sheet_name}`..."):
+                with st.spinner(f"📤 Uploading to {sheet_name}..."):
                     sheet_url = upload_to_existing_sheet(
                         df,
                         spreadsheet_url,
@@ -82,8 +84,10 @@ if uploaded_pdfs:
                         auto_resize=True,
                         rename_with_timestamp=False
                     )
-                st.success(f"✅ Uploaded to Google Sheets → `{sheet_name}`")
-                st.markdown(f"[🔗 Open Sheet: {sheet_name}]({sheet_url})", unsafe_allow_html=True)
+                if role == "Editor":
+                    st.success(f"✅ Uploaded to Google Sheets → `{sheet_name}`")
+                    # Show open sheet link ONLY to Editors
+                    st.markdown(f"[🔗 Open Sheet: {sheet_name}]({sheet_url})", unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"❌ Error uploading to {sheet_name}: {e}")
                 continue
@@ -97,9 +101,9 @@ if uploaded_pdfs:
                     mime="text/csv"
                 )
             else:
-                user_uploaded = True
+                user_uploaded = True  # Mark for download section
 
-# --- USER: POST-PROCESSING DOWNLOAD ---
+# --- USER: Post-upload download of Sheet1 & Label_Name ---
 if role == "User" and user_uploaded:
     st.markdown("---")
     st.info("📥 Download Converted Data")
@@ -116,10 +120,10 @@ if role == "User" and user_uploaded:
         except Exception as e:
             st.error(f"❌ Error downloading files: {e}")
 
-# --- EDITOR: FILTERED DOWNLOAD FROM SHEET1 ---
+# --- EDITOR: Download Filtered Sheet1 CSV ---
 if role == "Editor":
     st.markdown("---")
-    st.info("🔽 Download CSV from Sheet1 (with optional search filter)")
+    st.info("🔽 Download CSV from Sheet1")
 
     search_term = st.text_input("🔍 Enter word to filter rows in Sheet1 (leave empty for all rows):")
 
@@ -144,5 +148,6 @@ if role == "Editor":
             else:
                 csv = filtered_df.to_csv(index=False).encode("utf-8")
                 st.download_button("⬇ Download Filtered CSV (Sheet1)", data=csv, file_name="sheet1_filtered_data.csv", mime="text/csv")
+
         except Exception as e:
             st.error(f"❌ Failed to download Sheet1 data: {e}")
