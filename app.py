@@ -48,39 +48,55 @@ spreadsheet_url_map = {
 }
 spreadsheet_url = spreadsheet_url_map.get(spreadsheet_option)
 
-# --- UPLOAD PDF AND PROCESS (All roles allowed) ---
-uploaded_pdf = st.file_uploader("📁 Upload your PDF", type="pdf")
+# --- UPLOAD MULTIPLE PDFs AND PROCESS (All roles allowed) ---
+st.markdown("### 📁 Upload up to 6 PDFs to convert and export")
+uploaded_pdfs = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True, help="Upload 1 to 6 PDF files")
 
-if uploaded_pdf:
-    if st.button("🚀 Convert and Export"):
-        try:
-            with st.spinner("⏳ Reading and parsing PDF..."):
-                df = parse_pdf_to_dataframe_bounding_boxes(uploaded_pdf)
-            st.success("✅ PDF parsed successfully")
-            st.dataframe(df)
-        except Exception as e:
-            st.error(f"❌ Error parsing PDF: {e}")
-            st.stop()
+sheet_targets = ["Sheet3", "Sheet4", "Sheet5", "Sheet6", "Sheet7", "Sheet8"]
 
-        try:
-            with st.spinner("📤 Uploading to Google Sheets (Sheet3)..."):
-                sheet_url = upload_to_existing_sheet(
-                    df,
-                    spreadsheet_url,
-                    sheet_name="Sheet3",
-                    auto_resize=True,
-                    rename_with_timestamp=False
-                )
-            st.success("✅ Uploaded to Google Sheets")
-            if role == "Editor":
-                st.markdown(f"[🔗 Open Sheet]({sheet_url})", unsafe_allow_html=True)
-        except Exception as e:
-            st.error(f"❌ Error uploading to Google Sheets: {e}")
+if uploaded_pdfs:
+    if len(uploaded_pdfs) > 6:
+        st.warning("⚠️ Please upload a maximum of 6 PDFs.")
+    elif st.button("🚀 Convert and Export All"):
+        for i, pdf_file in enumerate(uploaded_pdfs):
+            sheet_name = sheet_targets[i]
+            st.markdown(f"#### 📄 Processing File {i+1} → `{sheet_name}`")
 
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇ Download CSV (Parsed PDF)", data=csv, file_name="converted.csv", mime="text/csv")
+            try:
+                with st.spinner(f"⏳ Parsing PDF {i+1}..."):
+                    df = parse_pdf_to_dataframe_bounding_boxes(pdf_file)
+                st.success(f"✅ PDF {i+1} parsed successfully")
+                st.dataframe(df)
+            except Exception as e:
+                st.error(f"❌ Error parsing PDF {i+1}: {e}")
+                continue
+
+            try:
+                with st.spinner(f"📤 Uploading to {sheet_name}..."):
+                    sheet_url = upload_to_existing_sheet(
+                        df,
+                        spreadsheet_url,
+                        sheet_name=sheet_name,
+                        auto_resize=True,
+                        rename_with_timestamp=False
+                    )
+                st.success(f"✅ Uploaded to Google Sheets → `{sheet_name}`")
+                if role == "Editor":
+                    st.markdown(f"[🔗 Open Sheet: {sheet_name}]({sheet_url})", unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"❌ Error uploading to {sheet_name}: {e}")
+                continue
+
+            # CSV download per file
+            csv_data = df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                f"⬇ Download CSV for {sheet_name}",
+                data=csv_data,
+                file_name=f"{sheet_name.lower()}_converted.csv",
+                mime="text/csv"
+            )
 else:
-    st.info("📌 Please upload a PDF to continue.")
+    st.info("📌 Upload up to 6 PDFs to continue.")
 
 # --- USER & EDITOR: DOWNLOAD FROM SHEET1 ---
 st.markdown("---")
