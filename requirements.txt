@@ -3,3 +3,4 @@ pandas
 PyMuPDF
 gspread
 google-auth
+google-api-python-client  # ✅ ADD THIS LINE
