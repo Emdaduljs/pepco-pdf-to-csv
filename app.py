@@ -7,10 +7,19 @@ from gsheet import upload_to_existing_sheet
 st.set_page_config(page_title="PDF to Sheet", layout="centered")
 st.title("📄 Upload PDF → Export to Google Sheet + CSV")
 
-# --- Password Protection ---
+# --- SIDEBAR LOGIN & LOGO ---
 st.sidebar.subheader("🔒 Login Required")
 password = st.sidebar.text_input("Enter password", type="password")
 
+# --- LOGO UNDER PASSWORD ---
+from PIL import Image
+try:
+    logo = Image.open("ui_logo.png")
+    st.sidebar.image(logo, width=149)
+except Exception as e:
+    st.sidebar.warning("⚠️ Logo not found (ui_logo.png)")
+
+# --- PASSWORD CHECK ---
 if password not in ["123", "1234"]:
     st.warning("Please enter a valid password to continue.")
     st.stop()
@@ -18,10 +27,10 @@ if password not in ["123", "1234"]:
 role = "Editor" if password == "123" else "User"
 st.sidebar.success(f"✅ Logged in as: {role}")
 
-# --- File Upload ---
+# --- FILE UPLOAD ---
 uploaded_pdf = st.file_uploader("📁 Upload your PDF", type="pdf")
 
-# --- Google Sheet Selection ---
+# --- SHEET SELECTION ---
 st.subheader("🔗 Select Google Sheet")
 spreadsheet_option = st.selectbox("Choose a brand:", ["Pepco", "Pep&co"])
 
@@ -31,7 +40,7 @@ spreadsheet_url_map = {
 }
 spreadsheet_url = spreadsheet_url_map.get(spreadsheet_option)
 
-# --- Main App Logic ---
+# --- MAIN APP LOGIC ---
 if uploaded_pdf and spreadsheet_url:
     if st.button("🚀 Process & Export"):
         try:
@@ -45,7 +54,6 @@ if uploaded_pdf and spreadsheet_url:
 
         if not df.empty:
             if "ORDER" in df.columns and "ITEM" in df.columns:
-                # Only editors can upload to Google Sheets
                 if role == "Editor":
                     try:
                         with st.spinner("📤 Uploading to Google Sheets..."):
@@ -63,7 +71,7 @@ if uploaded_pdf and spreadsheet_url:
                 else:
                     st.info("🔒 Upload disabled for 'User' access.")
 
-                # CSV Download allowed for all
+                # CSV download allowed for both roles
                 csv = df.to_csv(index=False).encode("utf-8")
                 st.download_button("⬇ Download CSV", data=csv, file_name="converted.csv", mime="text/csv")
             else:
