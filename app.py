@@ -60,6 +60,8 @@ if uploaded_pdfs:
         st.warning("⚠️ You can upload a maximum of 6 PDFs only.")
     elif st.button("🚀 Convert and Export All"):
         for i, pdf_file in enumerate(uploaded_pdfs):
+            if i >= len(sheet_targets):
+                break
             sheet_name = sheet_targets[i]
             if role == "Editor":
                 st.markdown(f"#### 📄 Processing File {i+1} → `{sheet_name}`")
