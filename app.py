@@ -7,7 +7,11 @@ import zipfile
 import io
 
 # --- SETUP ---
-st.set_page_config(page_title="Cuda Automation CSV Converter", layout="centered")
+st.set_page_config(
+    page_title="Cuda Automation CSV Converter",
+    layout="centered",
+    menu_items={}  # 🔒 Removes GitHub & help from top-right
+)
 st.title("📄 Cuda Automation CSV Converter from PDF")
 
 # --- SIDEBAR LOGIN & LOGO ---
@@ -125,7 +129,7 @@ if st.button("⬇ Download Selected CSV"):
     except Exception as e:
         st.error(f"❌ Failed to download `{download_option}`: {e}")
 
-# --- ZIP ALL CSV ---
+# --- ZIP ALL CSVs ---
 if st.button("📦 Download All Sheets as ZIP"):
     try:
         zip_buffer = io.BytesIO()
@@ -151,6 +155,7 @@ if st.button("📦 Download All Sheets as ZIP"):
 if role == "Editor":
     st.markdown("---")
     st.info("🔽 Download CSV from Sheet1")
+
     search_term = st.text_input("🔍 Enter word to filter rows in Sheet1 (leave empty for all rows):")
 
     if st.button("⬇ Download CSV from Sheet1"):
@@ -169,6 +174,11 @@ if role == "Editor":
                 st.warning("⚠️ No matching rows found for the search term.")
             else:
                 csv = filtered_df.to_csv(index=False).encode("utf-8")
-                st.download_button("⬇ Download Filtered CSV (Sheet1)", data=csv, file_name="sheet1_filtered_data.csv", mime="text/csv")
+                st.download_button(
+                    "⬇ Download Filtered CSV (Sheet1)",
+                    data=csv,
+                    file_name="sheet1_filtered_data.csv",
+                    mime="text/csv"
+                )
         except Exception as e:
             st.error(f"❌ Failed to download Sheet1 data: {e}")
