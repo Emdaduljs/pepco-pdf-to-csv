@@ -81,7 +81,15 @@ def download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1"):
     columns = values[0]
     data = values[1:]
 
-    df = pd.DataFrame(data, columns=columns)
+    # Pad rows to match header length to avoid pandas errors
+    max_cols = len(columns)
+    padded_data = []
+    for row in data:
+        if len(row) < max_cols:
+            row += [""] * (max_cols - len(row))
+        padded_data.append(row[:max_cols])  # Trim if longer
+
+    df = pd.DataFrame(padded_data, columns=columns)
 
     for col in df.columns:
         df[col] = pd.to_numeric(df[col], errors='ignore')
