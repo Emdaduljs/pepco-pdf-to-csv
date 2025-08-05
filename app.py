@@ -31,7 +31,7 @@ st.sidebar.success(f"✅ Logged in as: {role}")
 uploaded_pdf = st.file_uploader("📁 Upload your PDF", type="pdf")
 
 # --- SHEET SELECTION ---
-st.subheader("🔗 Select Google Sheet")
+st.subheader("🔗 Select Your Automation's Buyer")
 spreadsheet_option = st.selectbox("Choose a brand:", ["Pepco", "Pep&co"])
 
 spreadsheet_url_map = {
