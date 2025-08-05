@@ -50,13 +50,13 @@ spreadsheet_url = spreadsheet_url_map.get(spreadsheet_option)
 
 # --- UPLOAD MULTIPLE PDFs AND PROCESS (All roles allowed) ---
 st.markdown("### 📁 Upload up to 6 PDFs to convert and export")
-uploaded_pdfs = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True, help="Upload 1 to 6 PDF files")
+uploaded_pdfs = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
 
 sheet_targets = ["Sheet3", "Sheet4", "Sheet5", "Sheet6", "Sheet7", "Sheet8"]
 
 if uploaded_pdfs:
     if len(uploaded_pdfs) > 6:
-        st.warning("⚠️ Please upload a maximum of 6 PDFs.")
+        st.warning("⚠️ You can upload a maximum of 6 PDFs only.")
     elif st.button("🚀 Convert and Export All"):
         for i, pdf_file in enumerate(uploaded_pdfs):
             sheet_name = sheet_targets[i]
@@ -96,7 +96,7 @@ if uploaded_pdfs:
                 mime="text/csv"
             )
 else:
-    st.info("📌 Upload up to 6 PDFs to continue.")
+    st.info("📌 Please upload 1–6 PDFs to continue.")
 
 # --- USER & EDITOR: DOWNLOAD FROM SHEET1 ---
 st.markdown("---")
