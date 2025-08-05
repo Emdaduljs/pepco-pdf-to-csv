@@ -3,6 +3,8 @@ import pandas as pd
 from converter import parse_pdf_to_dataframe_bounding_boxes
 from gsheet import upload_to_existing_sheet, download_sheet_as_df
 from PIL import Image
+from io import BytesIO
+import zipfile
 
 # --- SETUP ---
 st.set_page_config(page_title="Cuda Automation CSV Converter", layout="centered")
@@ -22,7 +24,7 @@ users = {
 username = st.sidebar.selectbox("Username", list(users.keys()))
 password = st.sidebar.text_input("Password", type="password")
 
-# Load logo image
+# Load logo
 try:
     logo = Image.open("ui_logo.png")
     st.sidebar.image(logo, width=149)
@@ -38,7 +40,7 @@ if password != users.get(username):
 role = "Editor" if username == "Emdaduljs" else "User"
 st.sidebar.success(f"✅ Logged in as: {role} ({username})")
 
-# --- BRAND SHEET SELECTION ---
+# --- BRAND SELECTION ---
 st.subheader("🔗 Select Your Automation's Buyer")
 spreadsheet_option = st.selectbox("Choose a brand:", ["Pepco", "Pep&co"])
 
@@ -48,7 +50,7 @@ spreadsheet_url_map = {
 }
 spreadsheet_url = spreadsheet_url_map.get(spreadsheet_option)
 
-# --- UPLOAD MULTIPLE PDFs AND PROCESS (All roles allowed) ---
+# --- UPLOAD MULTIPLE PDFs ---
 st.markdown("### 📁 Upload up to 6 PDFs to convert and export")
 uploaded_pdfs = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
 
@@ -60,13 +62,16 @@ if uploaded_pdfs:
     elif st.button("🚀 Convert and Export All"):
         for i, pdf_file in enumerate(uploaded_pdfs):
             sheet_name = sheet_targets[i]
-            st.markdown(f"#### 📄 Processing File {i+1} → `{sheet_name}`")
+            if role == "Editor":
+                st.markdown(f"#### 📄 Processing File {i+1} → `{sheet_name}`")
 
             try:
                 with st.spinner(f"⏳ Parsing PDF {i+1}..."):
                     df = parse_pdf_to_dataframe_bounding_boxes(pdf_file)
-                st.success(f"✅ PDF {i+1} parsed successfully")
-                st.dataframe(df)
+
+                if role == "Editor":
+                    st.success(f"✅ PDF {i+1} parsed successfully")
+                    st.dataframe(df)
             except Exception as e:
                 st.error(f"❌ Error parsing PDF {i+1}: {e}")
                 continue
@@ -80,52 +85,76 @@ if uploaded_pdfs:
                         auto_resize=True,
                         rename_with_timestamp=False
                     )
-                st.success(f"✅ Uploaded to Google Sheets → `{sheet_name}`")
                 if role == "Editor":
+                    st.success(f"✅ Uploaded to Google Sheets → `{sheet_name}`")
                     st.markdown(f"[🔗 Open Sheet: {sheet_name}]({sheet_url})", unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"❌ Error uploading to {sheet_name}: {e}")
                 continue
 
-            # CSV download per file
-            csv_data = df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                f"⬇ Download CSV for {sheet_name}",
-                data=csv_data,
-                file_name=f"{sheet_name.lower()}_converted.csv",
-                mime="text/csv"
-            )
-else:
-    st.info("📌 Please upload 1–6 PDFs to continue.")
+            # Show download for editor only
+            if role == "Editor":
+                csv_data = df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    f"⬇ Download CSV for {sheet_name}",
+                    data=csv_data,
+                    file_name=f"{sheet_name.lower()}_converted.csv",
+                    mime="text/csv"
+                )
 
-# --- USER & EDITOR: DOWNLOAD FROM SHEET1 ---
+# --- USER & EDITOR: DOWNLOAD COMBINED SHEET1 + Label_Name ---
 st.markdown("---")
-st.info("🔽 Download CSV from Sheet1")
 
-# Optional search filter
-search_term = st.text_input("🔍 Enter word to filter rows in Sheet1 (leave empty for all rows):")
+if role == "User":
+    st.info("🔽 Download Sheet1 and Label_Name as CSV")
 
-if st.button("⬇ Download CSV from Sheet1"):
-    try:
-        df_sheet1 = download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1")
+    if st.button("⬇ Download Combined CSVs"):
+        try:
+            df1 = download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1")
+            df2 = download_sheet_as_df(spreadsheet_url, sheet_name="Label_Name")
 
-        if search_term:
-            search_term_lower = search_term.lower()
-            header_match = any(search_term_lower in str(col).lower() for col in df_sheet1.columns)
-            cell_match = df_sheet1.apply(lambda row: row.astype(str).str.lower().str.contains(search_term_lower).any(), axis=1).any()
+            # Create zip buffer
+            zip_buffer = BytesIO()
+            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zip_file:
+                zip_file.writestr("Sheet1.csv", df1.to_csv(index=False))
+                zip_file.writestr("Label_Name.csv", df2.to_csv(index=False))
 
-            if header_match or cell_match:
-                filtered_df = df_sheet1  # Return all rows if match in header or any cell
+            st.download_button(
+                "⬇ Download ZIP (Sheet1 + Label_Name)",
+                data=zip_buffer.getvalue(),
+                file_name="combined_sheets.zip",
+                mime="application/zip"
+            )
+        except Exception as e:
+            st.error(f"❌ Failed to download: {e}")
+
+# --- SHEET1 FILTER DOWNLOAD (All roles) ---
+if role == "Editor":
+    st.markdown("---")
+    st.info("🔽 Download CSV from Sheet1 with optional filter")
+
+    search_term = st.text_input("🔍 Enter word to filter rows in Sheet1 (leave empty for all rows):")
+
+    if st.button("⬇ Download CSV from Sheet1"):
+        try:
+            df_sheet1 = download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1")
+
+            if search_term:
+                search_term_lower = search_term.lower()
+                header_match = any(search_term_lower in str(col).lower() for col in df_sheet1.columns)
+                cell_match = df_sheet1.apply(lambda row: row.astype(str).str.lower().str.contains(search_term_lower).any(), axis=1).any()
+
+                if header_match or cell_match:
+                    filtered_df = df_sheet1
+                else:
+                    filtered_df = pd.DataFrame()
             else:
-                filtered_df = pd.DataFrame()  # Empty if no match found
-        else:
-            filtered_df = df_sheet1
+                filtered_df = df_sheet1
 
-        if filtered_df.empty:
-            st.warning("⚠️ No matching rows found for the search term.")
-        else:
-            csv = filtered_df.to_csv(index=False).encode("utf-8")
-            st.download_button("⬇ Download Filtered CSV (Sheet1)", data=csv, file_name="sheet1_filtered_data.csv", mime="text/csv")
-
-    except Exception as e:
-        st.error(f"❌ Failed to download Sheet1 data: {e}")
+            if filtered_df.empty:
+                st.warning("⚠️ No matching rows found for the search term.")
+            else:
+                csv = filtered_df.to_csv(index=False).encode("utf-8")
+                st.download_button("⬇ Download Filtered CSV (Sheet1)", data=csv, file_name="sheet1_filtered_data.csv", mime="text/csv")
+        except Exception as e:
+            st.error(f"❌ Failed to download Sheet1 data: {e}")
