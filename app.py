@@ -1,74 +1,38 @@
 ﻿import streamlit as st
 import pandas as pd
-import pdfplumber
-import io
-import datetime
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
+from converter import parse_pdf_to_dataframe_bounding_boxes
+from gsheet import upload_to_existing_sheet
 
-# ------------------- CONFIG -------------------
-SHEET_NAME = 'Sheet3'
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+st.set_page_config(page_title="PDF to Sheet", layout="centered")
+st.title("📄 Upload PDF → Export to Google Sheet + CSV")
 
-# ------------------- LOAD GOOGLE SHEETS CLIENT -------------------
-@st.cache_resource
-def get_gsheet_client():
-    credentials = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"], scopes=SCOPES
-    )
-    return build("sheets", "v4", credentials=credentials)
+uploaded_pdf = st.file_uploader("📁 Upload your PDF", type="pdf")
+spreadsheet_url = st.text_input("🔗 Google Spreadsheet URL")
 
-# ------------------- PARSE PDF -------------------
-def extract_tables_from_pdf(uploaded_pdf):
-    pdf_data = []
-    with pdfplumber.open(uploaded_pdf) as pdf:
-        for page in pdf.pages:
-            tables = page.extract_tables()
-            for table in tables:
-                df = pd.DataFrame(table)
-                df = df.dropna(how="all")  # Drop fully empty rows
-                if not df.empty:
-                    pdf_data.append(df)
-    return pd.concat(pdf_data, ignore_index=True) if pdf_data else pd.DataFrame()
+if uploaded_pdf and spreadsheet_url:
+    if st.button("🚀 Process & Export"):
+        try:
+            with st.spinner("⏳ Reading PDF..."):
+                df = parse_pdf_to_dataframe_bounding_boxes(uploaded_pdf)
+            st.success("✅ PDF parsed")
+            st.dataframe(df)
+        except Exception as e:
+            st.error(f"Error parsing PDF: {e}")
+            st.stop()
 
-# ------------------- EXPORT TO GOOGLE SHEETS -------------------
-def export_to_sheet(df, sheet_id):
-    service = get_gsheet_client()
-    sheet = service.spreadsheets()
+        if not df.empty:
+            if "ORDER" in df.columns and "ITEM" in df.columns:
+                try:
+                    with st.spinner("📤 Uploading to Google Sheets..."):
+                        sheet_url = upload_to_existing_sheet(df, spreadsheet_url, "Sheet3", auto_resize=True, rename_with_timestamp=True)
+                    st.success("✅ Uploaded to Google Sheets")
+                    st.markdown(f"[🔗 Open Sheet]({sheet_url})", unsafe_allow_html=True)
 
-    # Clear Sheet3
-    sheet.values().clear(
-        spreadsheetId=sheet_id,
-        range=SHEET_NAME
-    ).execute()
-
-    # Upload new data
-    values = df.astype(str).values.tolist()
-    sheet.values().update(
-        spreadsheetId=sheet_id,
-        range=SHEET_NAME,
-        valueInputOption="RAW",
-        body={"values": [df.columns.tolist()] + values}
-    ).execute()
-
-# ------------------- STREAMLIT UI -------------------
-st.title("📄 PDF to Google Sheet - Pepco")
-
-sheet_id = st.secrets["spreadsheet_id"]
-uploaded_pdf = st.file_uploader("Upload PDF", type=["pdf"])
-
-if uploaded_pdf:
-    try:
-        st.info("Parsing PDF...")
-        df = extract_tables_from_pdf(uploaded_pdf)
-
-        if df.empty:
-            st.error("No table found in PDF.")
-        else:
-            st.dataframe(df, use_container_width=True)
-            st.success("✅ Table extracted.")
-
-            export_to_sheet(df, sheet_id)
-            st.success(f"✅ Data exported to '{SHEET_NAME}' in your Google Sheet.")
-    except Exception as e:
-        st.error(f"❌ Error: {e}")
+                    csv = df.to_csv(index=False).encode("utf-8")
+                    st.download_button("⬇ Download CSV", data=csv, file_name="converted.csv", mime="text/csv")
+                except Exception as e:
+                    st.error(f"❌ Error uploading to Google Sheets: {e}")
+            else:
+                st.error("❌ 'ORDER' and 'ITEM' columns not found in parsed data.")
+else:
+    st.info("📌 Upload a PDF and provide your Google Sheet URL.")
