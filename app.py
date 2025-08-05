@@ -11,7 +11,6 @@ st.title("📄 Cuda Automation CSV Converter from PDF")
 # --- SIDEBAR LOGIN & LOGO ---
 st.sidebar.subheader("🔒 Login Required")
 
-# Predefined login credentials
 users = {
     "Emdaduljs": "123",     # Editor
     "Test1": "1234",        # User
@@ -22,23 +21,20 @@ users = {
 username = st.sidebar.selectbox("Username", list(users.keys()))
 password = st.sidebar.text_input("Password", type="password")
 
-# Load logo image
 try:
     logo = Image.open("ui_logo.png")
     st.sidebar.image(logo, width=149)
 except Exception:
     st.sidebar.warning("⚠️ Logo not found (ui_logo.png)")
 
-# Validate login
 if password != users.get(username):
     st.warning("❌ Invalid username or password.")
     st.stop()
 
-# Assign role
 role = "Editor" if username == "Emdaduljs" else "User"
 st.sidebar.success(f"✅ Logged in as: {role} ({username})")
 
-# --- BRAND SHEET SELECTION ---
+# --- BRAND SELECTION ---
 st.subheader("🔗 Select Your Automation's Buyer")
 spreadsheet_option = st.selectbox("Choose a brand:", ["Pepco", "Pep&co"])
 
@@ -53,7 +49,7 @@ st.markdown("### 📁 Upload up to 6 PDFs to convert and export")
 uploaded_pdfs = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
 
 sheet_targets = ["Sheet3", "Sheet4", "Sheet5", "Sheet6", "Sheet7", "Sheet8"]
-user_uploaded = False  # Track if user has exported PDFs
+user_uploaded = False
 
 if uploaded_pdfs:
     if len(uploaded_pdfs) > 6:
@@ -86,7 +82,6 @@ if uploaded_pdfs:
                     )
                 if role == "Editor":
                     st.success(f"✅ Uploaded to Google Sheets → `{sheet_name}`")
-                    # Show open sheet link ONLY to Editors
                     st.markdown(f"[🔗 Open Sheet: {sheet_name}]({sheet_url})", unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"❌ Error uploading to {sheet_name}: {e}")
@@ -101,24 +96,35 @@ if uploaded_pdfs:
                     mime="text/csv"
                 )
             else:
-                user_uploaded = True  # Mark for download section
+                user_uploaded = True
 
-# --- USER: Post-upload download of Sheet1 & Label_Name ---
-if role == "User" and user_uploaded:
-    st.markdown("---")
-    st.info("📥 Download Converted Data")
-    if st.button("⬇ Download All CSV (Sheet1 + Label_Name)"):
+# --- ALL USERS: Download Multiple Predefined Sheets ---
+st.markdown("---")
+st.info("📥 Download Pepco Main Data Sheets")
+
+if st.button("⬇ Download All CSVs"):
+    sheet_names = [
+        "PepcoMainData",
+        "CLName",
+        "MLName",
+        "HeatSealName",
+        "TAGName",
+        "BenefitTAGName",
+        "BenefitStickerName"
+    ]
+
+    for sheet in sheet_names:
         try:
-            df1 = download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1")
-            df2 = download_sheet_as_df(spreadsheet_url, sheet_name="Label_Name")
-
-            csv1 = df1.to_csv(index=False).encode("utf-8")
-            csv2 = df2.to_csv(index=False).encode("utf-8")
-
-            st.download_button("⬇ Download Sheet1 CSV", data=csv1, file_name="Sheet1.csv", mime="text/csv")
-            st.download_button("⬇ Download Label_Name CSV", data=csv2, file_name="Label_Name.csv", mime="text/csv")
+            df = download_sheet_as_df(spreadsheet_url, sheet_name=sheet)
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                f"⬇ Download {sheet}.csv",
+                data=csv,
+                file_name=f"{sheet}.csv",
+                mime="text/csv"
+            )
         except Exception as e:
-            st.error(f"❌ Error downloading files: {e}")
+            st.error(f"❌ Could not download `{sheet}`: {e}")
 
 # --- EDITOR: Download Filtered Sheet1 CSV ---
 if role == "Editor":
