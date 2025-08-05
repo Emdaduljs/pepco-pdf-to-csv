@@ -48,105 +48,68 @@ spreadsheet_url_map = {
 }
 spreadsheet_url = spreadsheet_url_map.get(spreadsheet_option)
 
-# --- UPLOAD MULTIPLE PDFs AND PROCESS ---
-st.markdown("### 📁 Upload up to 6 PDFs to convert and export")
-uploaded_pdfs = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
+# --- UPLOAD PDF AND PROCESS (All roles allowed) ---
+uploaded_pdf = st.file_uploader("📁 Upload your PDF", type="pdf")
 
-sheet_targets = ["Sheet3", "Sheet4", "Sheet5", "Sheet6", "Sheet7", "Sheet8"]
-user_uploaded = False  # Track if user has exported PDFs
+if uploaded_pdf:
+    if st.button("🚀 Convert and Export"):
+        try:
+            with st.spinner("⏳ Reading and parsing PDF..."):
+                df = parse_pdf_to_dataframe_bounding_boxes(uploaded_pdf)
+            st.success("✅ PDF parsed successfully")
+            st.dataframe(df)
+        except Exception as e:
+            st.error(f"❌ Error parsing PDF: {e}")
+            st.stop()
 
-if uploaded_pdfs:
-    if len(uploaded_pdfs) > 6:
-        st.warning("⚠️ You can upload a maximum of 6 PDFs only.")
-    elif st.button("🚀 Convert and Export All"):
-        for i, pdf_file in enumerate(uploaded_pdfs):
-            if i >= len(sheet_targets):
-                break
-            sheet_name = sheet_targets[i]
-            if role == "Editor":
-                st.markdown(f"#### 📄 Processing File {i+1} → `{sheet_name}`")
-            try:
-                with st.spinner(f"⏳ Parsing PDF {i+1}..."):
-                    df = parse_pdf_to_dataframe_bounding_boxes(pdf_file)
-                if role == "Editor":
-                    st.success(f"✅ PDF {i+1} parsed successfully")
-                    st.dataframe(df)
-            except Exception as e:
-                st.error(f"❌ Error parsing PDF {i+1}: {e}")
-                continue
-
-            try:
-                with st.spinner(f"📤 Uploading to {sheet_name}..."):
-                    sheet_url = upload_to_existing_sheet(
-                        df,
-                        spreadsheet_url,
-                        sheet_name=sheet_name,
-                        auto_resize=True,
-                        rename_with_timestamp=False
-                    )
-                if role == "Editor":
-                    st.success(f"✅ Uploaded to Google Sheets → `{sheet_name}`")
-                    st.markdown(f"[🔗 Open Sheet: {sheet_name}]({sheet_url})", unsafe_allow_html=True)
-            except Exception as e:
-                st.error(f"❌ Error uploading to {sheet_name}: {e}")
-                continue
-
-            if role == "Editor":
-                csv_data = df.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    f"⬇ Download CSV for {sheet_name}",
-                    data=csv_data,
-                    file_name=f"{sheet_name.lower()}_converted.csv",
-                    mime="text/csv"
+        try:
+            with st.spinner("📤 Uploading to Google Sheets (Sheet3)..."):
+                sheet_url = upload_to_existing_sheet(
+                    df,
+                    spreadsheet_url,
+                    sheet_name="Sheet3",
+                    auto_resize=True,
+                    rename_with_timestamp=False
                 )
-            else:
-                user_uploaded = True  # Mark for download section
-
-# --- USER: Post-upload download of Sheet1 & Label_Name ---
-if role == "User" and user_uploaded:
-    st.markdown("---")
-    st.info("📥 Download Converted Data")
-    if st.button("⬇ Download All CSV (Sheet1 + Label_Name)"):
-        try:
-            df1 = download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1")
-            df2 = download_sheet_as_df(spreadsheet_url, sheet_name="Label_Name")
-
-            csv1 = df1.to_csv(index=False).encode("utf-8")
-            csv2 = df2.to_csv(index=False).encode("utf-8")
-
-            st.download_button("⬇ Download Sheet1 CSV", data=csv1, file_name="Sheet1.csv", mime="text/csv")
-            st.download_button("⬇ Download Label_Name CSV", data=csv2, file_name="Label_Name.csv", mime="text/csv")
+            st.success("✅ Uploaded to Google Sheets")
+            if role == "Editor":
+                st.markdown(f"[🔗 Open Sheet]({sheet_url})", unsafe_allow_html=True)
         except Exception as e:
-            st.error(f"❌ Error downloading files: {e}")
+            st.error(f"❌ Error uploading to Google Sheets: {e}")
 
-# --- EDITOR: Download Filtered Sheet1 CSV ---
-if role == "Editor":
-    st.markdown("---")
-    st.info("🔽 Download CSV from Sheet1")
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇ Download CSV (Parsed PDF)", data=csv, file_name="converted.csv", mime="text/csv")
+else:
+    st.info("📌 Please upload a PDF to continue.")
 
-    search_term = st.text_input("🔍 Enter word to filter rows in Sheet1 (leave empty for all rows):")
+# --- USER & EDITOR: DOWNLOAD FROM SHEET1 ---
+st.markdown("---")
+st.info("🔽 Download CSV from Sheet1")
 
-    if st.button("⬇ Download CSV from Sheet1"):
-        try:
-            df_sheet1 = download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1")
+# Optional search filter
+search_term = st.text_input("🔍 Enter word to filter rows in Sheet1 (leave empty for all rows):")
 
-            if search_term:
-                search_term_lower = search_term.lower()
-                header_match = any(search_term_lower in str(col).lower() for col in df_sheet1.columns)
-                cell_match = df_sheet1.apply(lambda row: row.astype(str).str.lower().str.contains(search_term_lower).any(), axis=1).any()
+if st.button("⬇ Download CSV from Sheet1"):
+    try:
+        df_sheet1 = download_sheet_as_df(spreadsheet_url, sheet_name="Sheet1")
 
-                if header_match or cell_match:
-                    filtered_df = df_sheet1
-                else:
-                    filtered_df = pd.DataFrame()
+        if search_term:
+            search_term_lower = search_term.lower()
+            header_match = any(search_term_lower in str(col).lower() for col in df_sheet1.columns)
+            cell_match = df_sheet1.apply(lambda row: row.astype(str).str.lower().str.contains(search_term_lower).any(), axis=1).any()
+
+            if header_match or cell_match:
+                filtered_df = df_sheet1  # Return all rows if match in header or any cell
             else:
-                filtered_df = df_sheet1
+                filtered_df = pd.DataFrame()  # Empty if no match found
+        else:
+            filtered_df = df_sheet1
 
-            if filtered_df.empty:
-                st.warning("⚠️ No matching rows found for the search term.")
-            else:
-                csv = filtered_df.to_csv(index=False).encode("utf-8")
-                st.download_button("⬇ Download Filtered CSV (Sheet1)", data=csv, file_name="sheet1_filtered_data.csv", mime="text/csv")
+        if filtered_df.empty:
+            st.warning("⚠️ No matching rows found for the search term.")
+        else:
+            csv = filtered_df.to_csv(index=False).encode("utf-8")
+            st.download_button("⬇ Download Filtered CSV (Sheet1)", data=csv, file_name="sheet1_filtered_data.csv", mime="text/csv")
 
-        except Exception as e:
-            st.error(f"❌ Failed to download Sheet1 data: {e}")
+    except Exception as e:
+        st.error(f"❌ Failed to download Sheet1 data: {e}")
