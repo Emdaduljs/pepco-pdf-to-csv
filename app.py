@@ -3,6 +3,8 @@ import pandas as pd
 from converter import parse_pdf_to_dataframe_bounding_boxes
 from gsheet import upload_to_existing_sheet, download_sheet_as_df
 from PIL import Image
+import zipfile
+import io
 
 # --- SETUP ---
 st.set_page_config(page_title="Cuda Automation CSV Converter", layout="centered")
@@ -10,14 +12,12 @@ st.title("📄 Cuda Automation CSV Converter from PDF")
 
 # --- SIDEBAR LOGIN & LOGO ---
 st.sidebar.subheader("🔒 Login Required")
-
 users = {
     "Emdaduljs": "123",     # Editor
     "Test1": "1234",        # User
     "Test2": "12345",       # User
     "Test3": "123456",      # User
 }
-
 username = st.sidebar.selectbox("Username", list(users.keys()))
 password = st.sidebar.text_input("Password", type="password")
 
@@ -37,7 +37,6 @@ st.sidebar.success(f"✅ Logged in as: {role} ({username})")
 # --- BRAND SELECTION ---
 st.subheader("🔗 Select Your Automation's Buyer")
 spreadsheet_option = st.selectbox("Choose a brand:", ["Pepco", "Pep&co"])
-
 spreadsheet_url_map = {
     "Pepco": "https://docs.google.com/spreadsheets/d/1ug0VTy8iwUeSdpw4upHkVMxnwSekvYrxz6nm04_BJ-o/edit?usp=sharing",
     "Pep&co": "https://docs.google.com/spreadsheets/d/YOUR_OTHER_SHEET_ID/edit?usp=sharing"
@@ -47,7 +46,6 @@ spreadsheet_url = spreadsheet_url_map.get(spreadsheet_option)
 # --- UPLOAD MULTIPLE PDFs AND PROCESS ---
 st.markdown("### 📁 Upload up to 6 PDFs to convert and export")
 uploaded_pdfs = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
-
 sheet_targets = ["Sheet3", "Sheet4", "Sheet5", "Sheet6", "Sheet7", "Sheet8"]
 user_uploaded = False
 
@@ -98,39 +96,61 @@ if uploaded_pdfs:
             else:
                 user_uploaded = True
 
-# --- ALL USERS: Download Multiple Predefined Sheets ---
+# --- ALL USERS: Download Dropdown + ZIP ---
 st.markdown("---")
 st.info("📥 Download Pepco Main Data Sheets")
 
-if st.button("⬇ Download All CSVs"):
-    sheet_names = [
-        "PepcoMainData",
-        "CLName",
-        "MLName",
-        "HeatSealName",
-        "TAGName",
-        "BenefitTAGName",
-        "BenefitStickerName"
-    ]
+sheet_names = [
+    "PepcoMainData",
+    "CLName",
+    "MLName",
+    "HeatSealName",
+    "TAGName",
+    "BenefitTAGName",
+    "BenefitStickerName"
+]
 
-    for sheet in sheet_names:
-        try:
-            df = download_sheet_as_df(spreadsheet_url, sheet_name=sheet)
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                f"⬇ Download {sheet}.csv",
-                data=csv,
-                file_name=f"{sheet}.csv",
-                mime="text/csv"
-            )
-        except Exception as e:
-            st.error(f"❌ Could not download `{sheet}`: {e}")
+download_option = st.selectbox("Select a sheet to download as CSV", sheet_names)
 
-# --- EDITOR: Download Filtered Sheet1 CSV ---
+if st.button("⬇ Download Selected CSV"):
+    try:
+        df = download_sheet_as_df(spreadsheet_url, sheet_name=download_option)
+        csv_data = df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            f"⬇ Download {download_option}.csv",
+            data=csv_data,
+            file_name=f"{download_option}.csv",
+            mime="text/csv"
+        )
+    except Exception as e:
+        st.error(f"❌ Failed to download `{download_option}`: {e}")
+
+# --- ZIP ALL CSV ---
+if st.button("📦 Download All Sheets as ZIP"):
+    try:
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+            for sheet in sheet_names:
+                try:
+                    df = download_sheet_as_df(spreadsheet_url, sheet_name=sheet)
+                    csv_data = df.to_csv(index=False)
+                    zip_file.writestr(f"{sheet}.csv", csv_data)
+                except Exception as e:
+                    st.warning(f"⚠️ Skipped {sheet}: {e}")
+        zip_buffer.seek(0)
+        st.download_button(
+            "📦 Download ZIP of All CSVs",
+            data=zip_buffer,
+            file_name="all_pepco_data.zip",
+            mime="application/zip"
+        )
+    except Exception as e:
+        st.error(f"❌ Failed to create ZIP file: {e}")
+
+# --- EDITOR: Filter Sheet1 CSV ---
 if role == "Editor":
     st.markdown("---")
     st.info("🔽 Download CSV from Sheet1")
-
     search_term = st.text_input("🔍 Enter word to filter rows in Sheet1 (leave empty for all rows):")
 
     if st.button("⬇ Download CSV from Sheet1"):
@@ -141,11 +161,7 @@ if role == "Editor":
                 search_term_lower = search_term.lower()
                 header_match = any(search_term_lower in str(col).lower() for col in df_sheet1.columns)
                 cell_match = df_sheet1.apply(lambda row: row.astype(str).str.lower().str.contains(search_term_lower).any(), axis=1).any()
-
-                if header_match or cell_match:
-                    filtered_df = df_sheet1
-                else:
-                    filtered_df = pd.DataFrame()
+                filtered_df = df_sheet1 if header_match or cell_match else pd.DataFrame()
             else:
                 filtered_df = df_sheet1
 
@@ -154,6 +170,5 @@ if role == "Editor":
             else:
                 csv = filtered_df.to_csv(index=False).encode("utf-8")
                 st.download_button("⬇ Download Filtered CSV (Sheet1)", data=csv, file_name="sheet1_filtered_data.csv", mime="text/csv")
-
         except Exception as e:
             st.error(f"❌ Failed to download Sheet1 data: {e}")
